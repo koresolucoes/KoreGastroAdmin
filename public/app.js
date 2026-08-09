@@ -239,4 +239,352 @@
         ${metric('Assinaturas ativas', shortNumber(data.activeSubscriptions), `${activeRate}% da base assinante`, 'success', '‚Üó')}
         ${metric('Clientes ChefOS', shortNumber(data.tenants), `${data.stores || 0} opera√ß√µes cadastradas`, '', '‚ó´')}
         ${metric('Chamados abertos', shortNumber(data.openTickets), `${data.inProgressTickets || 0} em atendimento`, data.urgentTickets ? 'warning' : '', '‚ú¶')}
-      <Ûm5∂âûÀk∫wµÁqÕï±ïç–ÅπÖµîÙâ¡±Öπ%êàÅ…ï≈’•…ïê¯ëÌÕ—Ö—îπ¡±ÖπÃπµÖ¿†°¡±Ö∏§ÄÙ¯ÅÄÒΩ¡—•Ω∏ÅŸÖ±’îÙàëÌ¡±Ö∏π•ëÙàÄëÌM—…•πú°Õ’âÕç…•¡—•Ω∏π¡±Öπ}•ê§ÄÙÙÙÅM—…•πú°¡±Ö∏π•ê§Ä¸ÄùÕï±ïç—ïêúÄËÄúùÙ¯ëÌïÕçÖ¡î°¡±Ö∏ππÖµî•ÙÉäPÄëÌµΩπï‰°¡±Ö∏π¡…•çî•ÙΩ∑©ÃΩΩ¡—•Ω∏˘Ä§π©Ω•∏†úú•ÙΩÕï±ïç–¯Ω±Öâï∞¯Ò±Öâï∞˘AÀÕ·•µÑÅ…ïπΩŸáüçºÒ•π¡’–ÅπÖµîÙâç’……ïπ—Aï…•ΩëπêàÅ—Â¡îÙâëÖ—îàÅŸÖ±’îÙàëÌ—Ω%π¡’—Ö—î°Õ’âÕç…•¡—•Ω∏πç’……ïπ—}¡ï…•Ωë}ïπê•ÙàÄº¯Ω±Öâï∞¯Òë•ÿÅç±ÖÕÃÙâµΩëÖ∞µÕ’µµÖ…‰à¯ÒÕ¡Ö∏¯ÒÕµÖ±∞˘=AIULΩÕµÖ±∞¯ÒÕ—…Ωπú¯ëÌ—ïπÖπ–πÕ—Ω…ïÃ¸π±ïπù—†ÅÒÄ¡ÙΩÕ—…Ωπú¯ΩÕ¡Ö∏¯ÒÕ¡Ö∏¯ÒÕµÖ±∞˘Y1=HÅQU0ΩÕµÖ±∞¯ÒÕ—…Ωπú¯ëÌµΩπï‰°¡±Öπ	Â%ê°Õ’âÕç…•¡—•Ω∏π¡±Öπ}•ê§¸π¡…•çî•ÙΩÕ—…Ωπú¯ΩÕ¡Ö∏¯Ωë•ÿ¯Ωë•ÿ¯ÒôΩΩ—ï»¯Òâ’——Ω∏Å—Â¡îÙââ’——Ω∏àÅç±ÖÕÃÙâÕïçΩπëÖ…‰àÅëÖ—ÑµÖç—•Ω∏Ùâç±ΩÕîµµΩëÖ∞à˘Öπçï±Ö»Ωâ’——Ω∏¯Òâ’——Ω∏Åç±ÖÕÃÙâ¡…•µÖ…‰àÅ—Â¡îÙâÕ’âµ•–à˘MÖ±ŸÖ»ÅÖ±—ï…áü’ïÃΩâ’——Ω∏¯ΩôΩΩ—ï»¯ΩôΩ…¥¯Ωë•ÿ˘ÄÏ(ÄÅÙ((ÄÅô’πç—•Ω∏Å—ïπÖπ—5ΩëÖ∞°—ïπÖπ–§ÅÏ(ÄÄÄÅçΩπÕ–ÅÕ’âÕç…•¡—•Ω∏ÄÙÅ—ïπÖπ–πÕ’âÕç…•¡—•ΩπÃ¸πl¡tÅÒÅÌÙÏ(ÄÄÄÅçΩπÕ–Å¡±Ö∏ÄÙÅ¡±Öπ	Â%ê°Õ’âÕç…•¡—•Ω∏π¡±Öπ}•ê§Ï(ÄÄÄÅ…ï—’…∏ÅÄÒë•ÿÅç±ÖÕÃÙâµΩëÖ∞µÕ°ï±∞Åë…Ö›ï»µÕ°ï±∞àÅ…Ω±îÙâë•Ö±ΩúàÅÖ…•ÑµµΩëÖ∞Ùâ—…’îàÅÖ…•Ñµ±Öâï±±ïëâ‰Ùâë…Ö›ï»µ—•—±îà¯Òâ’——Ω∏Åç±ÖÕÃÙâµΩëÖ∞µâÖç≠ë…Ω¿àÅëÖ—ÑµÖç—•Ω∏Ùâç±ΩÕîµµΩëÖ∞àÅÖ…•Ñµ±Öâï∞Ùâïç°Ö»à¯Ωâ’——Ω∏¯ÒÖÕ•ëîÅç±ÖÕÃÙâëï—Ö•∞µë…Ö›ï»à¯Ò°ïÖëï»¯Òë•ÿÅç±ÖÕÃÙâÖŸÖ—Ö»Å±Ö…ùîà¯ëÌ•π•—•Ö±Ã°—ïπÖπ–πô’±±}πÖµî•ÙΩë•ÿ¯Òâ’——Ω∏Åç±ÖÕÃÙâ•çΩ∏µâ’——Ω∏àÅëÖ—ÑµÖç—•Ω∏Ùâç±ΩÕîµµΩëÖ∞àÅÖ…•Ñµ±Öâï∞Ùâïç°Ö»à˚\Ωâ’——Ω∏¯Ω°ïÖëï»¯Òë•ÿÅç±ÖÕÃÙâë…Ö›ï»µ—•—±îà¯Ò¿Åç±ÖÕÃÙâïÂïâ…Ω‹à˘1%9QÅ!=LΩ¿¯Ò†»Å•êÙâë…Ö›ï»µ—•—±îà¯ëÌïÕçÖ¡î°—ïπÖπ–πô’±±}πÖµî•ÙΩ†»¯Ò¿¯ëÌïÕçÖ¡î°—ïπÖπ–πïµÖ•∞•ÙΩ¿¯ëÌÕ—Ö—’Ã°Õ’âÕç…•¡—•Ω∏πÕ—Ö—’Ã•ÙΩë•ÿ¯Òë•ÿÅç±ÖÕÃÙâëï—Ö•∞µù…•êà¯ÒÕ¡Ö∏¯ÒÕµÖ±∞˘A19<ΩÕµÖ±∞¯ÒÕ—…Ωπú¯ëÌïÕçÖ¡î°¡±Ö∏¸ππÖµîÅÒÄùMï¥Å¡±Öπºú•ÙΩÕ—…Ωπú¯ΩÕ¡Ö∏¯ÒÕ¡Ö∏¯ÒÕµÖ±∞˘Y1=HÅ59M0ΩÕµÖ±∞¯ÒÕ—…Ωπú¯ëÌµΩπï‰°¡±Ö∏¸π¡…•çî•ÙΩÕ—…Ωπú¯ΩÕ¡Ö∏¯ÒÕ¡Ö∏¯ÒÕµÖ±∞˘1%9QÅMΩÕµÖ±∞¯ÒÕ—…Ωπú¯ëÌëÖ‰°—ïπÖπ–πç…ïÖ—ïë}Ö–•ÙΩÕ—…Ωπú¯ΩÕ¡Ö∏¯ÒÕ¡Ö∏¯ÒÕµÖ±∞˚i1Q%5<ÅMM<ΩÕµÖ±∞¯ÒÕ—…Ωπú¯ëÌ…ï±Ö—•Ÿî°—ïπÖπ–π±ÖÕ—}Õ•ùπ}•π}Ö–ÅÒÅ—ïπÖπ–π’¡ëÖ—ïë}Ö–•ÙΩÕ—…Ωπú¯ΩÕ¡Ö∏¯Ωë•ÿ¯ÒÕïç—•Ω∏¯Òë•ÿÅç±ÖÕÃÙâ¡Öπï∞µ°ïÖë•πúà¯Ò†Ã˘=¡ï…áü’ïÃΩ†Ã¯ÒÕ¡Ö∏Åç±ÖÕÃÙâçΩ’π–µâÖëùîà¯ëÌ—ïπÖπ–πÕ—Ω…ïÃ¸π±ïπù—†ÅÒÄ¡ÙΩÕ¡Ö∏¯Ωë•ÿ¯Òë•ÿÅç±ÖÕÃÙâÕ—Ω…îµ±•Õ–à¯ëÏ°—ïπÖπ–πÕ—Ω…ïÃÅÒÅmt§πµÖ¿†°Õ—Ω…î§ÄÙ¯ÅÄÒë•ÿ¯ÒÕ¡Ö∏˚ä^¨ΩÕ¡Ö∏¯ÒÕ¡Ö∏¯ÒÕ—…Ωπú¯ëÌïÕçÖ¡î°Õ—Ω…îππÖµî•ÙΩÕ—…Ωπú¯ÒÕµÖ±∞˘…•ÖëÑÅï¥ÄëÌëÖ‰°Õ—Ω…îπç…ïÖ—ïë}Ö–•ÙΩÕµÖ±∞¯ΩÕ¡Ö∏¯Ωë•ÿ˘Ä§π©Ω•∏†úú§ÅÒÄúÒ¿Åç±ÖÕÃÙâïµ¡—‰à˘9ïπ°’µÑÅΩ¡ï…áüçºÅŸ•πç’±ÖëÑ∏Ω¿¯ùÙΩë•ÿ¯ΩÕïç—•Ω∏¯ÒôΩΩ—ï»¯Òâ’——Ω∏Åç±ÖÕÃÙâÕïçΩπëÖ…‰àÅëÖ—ÑµÖç—•Ω∏Ùâïë•–µÕ’âÕç…•¡—•Ω∏àÅëÖ—Ñµ•êÙàëÌ—ïπÖπ–π•ëÙà˘ï…ïπç•Ö»ÅÖÕÕ•πÖ—’…ÑΩâ’——Ω∏¯Òâ’——Ω∏Åç±ÖÕÃÙâ¡…•µÖ…‰àÅëÖ—ÑµÖç—•Ω∏Ùâ—ïπÖπ–µçÖ—Ö±ΩúàÅëÖ—Ñµ•êÙàëÌ—ïπÖπ–π•ëÙà˘Yï»ÅçÖ…ìÖ¡•ºΩâ’——Ω∏¯ΩôΩΩ—ï»¯ΩÖÕ•ëî¯Ωë•ÿ˘ÄÏ(ÄÅÙ((ÄÅô’πç—•Ω∏Å¡±Öπ5ΩëÖ∞†§ÅÏ(ÄÄÄÅ…ï—’…∏ÅÄÒë•ÿÅç±ÖÕÃÙâµΩëÖ∞µÕ°ï±∞àÅ…Ω±îÙâë•Ö±ΩúàÅÖ…•ÑµµΩëÖ∞Ùâ—…’îàÅÖ…•Ñµ±Öâï±±ïëâ‰ÙâµΩëÖ∞µ—•—±îà¯Òâ’——Ω∏Åç±ÖÕÃÙâµΩëÖ∞µâÖç≠ë…Ω¿àÅëÖ—ÑµÖç—•Ω∏Ùâç±ΩÕîµµΩëÖ∞àÅÖ…•Ñµ±Öâï∞Ùâïç°Ö»à¯Ωâ’——Ω∏¯ÒôΩ…¥Åç±ÖÕÃÙâµΩëÖ∞µçÖ…êÅ±Ö…ùîµµΩëÖ∞àÅëÖ—ÑµôΩ…¥Ùâ¡±Ö∏à¯Ò°ïÖëï»¯Òë•ÿ¯Ò¿Åç±ÖÕÃÙâïÂïâ…Ω‹à˘S1=<Å=5I%0Ω¿¯Ò†»Å•êÙâµΩëÖ∞µ—•—±îà˘…•Ö»ÅπΩŸºÅ¡±ÖπºΩ†»¯Ò¿˘Ωπô•ù’…îÅ¡…óùº∞Å±•µ•—ïÃÅîÅÖçïÕÕºÅëºÅ¡±Öπº∏Ω¿¯Ωë•ÿ¯Òâ’——Ω∏Å—Â¡îÙââ’——Ω∏àÅç±ÖÕÃÙâ•çΩ∏µâ’——Ω∏àÅëÖ—ÑµÖç—•Ω∏Ùâç±ΩÕîµµΩëÖ∞àÅÖ…•Ñµ±Öâï∞Ùâïç°Ö»à˚\Ωâ’——Ω∏¯Ω°ïÖëï»¯Òë•ÿÅç±ÖÕÃÙâµΩëÖ∞µâΩë‰ÅôΩ…¥µù…•êà¯Ò±Öâï∞˘9ΩµîÅëºÅ¡±ÖπºÒ•π¡’–ÅπÖµîÙâπÖµîàÅ…ï≈’•…ïêÅ¡±Öçï°Ω±ëï»ÙâA…Ωô•ÕÕ•ΩπÖ∞àÄº¯Ω±Öâï∞¯Ò±Öâï∞˘%ëïπ—•ô•çÖëΩ»Ò•π¡’–ÅπÖµîÙâÕ±’úàÅ…ï≈’•…ïêÅ¡±Öçï°Ω±ëï»Ùâ¡…Ωô•ÕÕ•ΩπÖ∞àÄº¯Ω±Öâï∞¯Ò±Öâï∞˘A…óùºÅµïπÕÖ∞Ò•π¡’–ÅπÖµîÙâ¡…•çîàÅ—Â¡îÙâπ’µâï»àÅÕ—ï¿Ùà¿∏¿ƒàÅµ•∏Ùà¿àÅ…ï≈’•…ïêÅ¡±Öçï°Ω±ëï»Ùàƒ‰‰∞¿¿àÄº¯Ω±Öâï∞¯Ò±Öâï∞˘Q…•Ö∞Ä°ë•ÖÃ§Ò•π¡’–ÅπÖµîÙâ—…•Ö∞àÅ—Â¡îÙâπ’µâï»àÅµ•∏Ùà¿àÅŸÖ±’îÙàÃ¿àÄº¯Ω±Öâï∞¯Ò±Öâï∞˘7Ö·•µºÅëîÅ±Ω©ÖÃÒ•π¡’–ÅπÖµîÙâÕ—Ω…ïÃàÅ—Â¡îÙâπ’µâï»àÅµ•∏ÙàƒàÅŸÖ±’îÙàƒàÄº¯Ω±Öâï∞¯Ò±Öâï∞Åç±ÖÕÃÙâ›•ëîà˘Aï…µ•Õœ’ïÃÅÕï¡Ö…ÖëÖÃÅ¡Ω»Å€µ…ù’±ÑÒ•π¡’–ÅπÖµîÙâ¡ï…µ•ÕÕ•ΩπÃàÅ¡±Öçï°Ω±ëï»ÙàΩëÖÕ°âΩÖ…ê∞ÄΩ¡ΩÃ∞ÄΩ…ï¡Ω…—ÃàÄº¯Ω±Öâï∞¯Ωë•ÿ¯ÒôΩΩ—ï»¯Òâ’——Ω∏Å—Â¡îÙââ’——Ω∏àÅç±ÖÕÃÙâÕïçΩπëÖ…‰àÅëÖ—ÑµÖç—•Ω∏Ùâç±ΩÕîµµΩëÖ∞à˘Öπçï±Ö»Ωâ’——Ω∏¯Òâ’——Ω∏Åç±ÖÕÃÙâ¡…•µÖ…‰àÅ—Â¡îÙâÕ’âµ•–à˘…•Ö»Å¡±ÖπºΩâ’——Ω∏¯ΩôΩΩ—ï»¯ΩôΩ…¥¯Ωë•ÿ˘ÄÏ(ÄÅÙ((ÄÅô’πç—•Ω∏ÅµΩëÖ±Y•ï‹†§ÅÏ(ÄÄÄÅ•òÄ†ÖÕ—Ö—îπµΩëÖ∞§Å…ï—’…∏ÄúúÏ(ÄÄÄÅ•òÄ°Õ—Ö—îπµΩëÖ∞π—Â¡îÄÙÙÙÄùÕ’âÕç…•¡—•Ω∏ú§Å…ï—’…∏ÅÕ’âÕç…•¡—•Ωπ5ΩëÖ∞°Õ—Ö—îπ—ïπÖπ—Ãπô•πê†°—ïπÖπ–§ÄÙ¯ÅM—…•πú°—ïπÖπ–π•ê§ÄÙÙÙÅM—…•πú°Õ—Ö—îπµΩëÖ∞π•ê§§§Ï(ÄÄÄÅ•òÄ°Õ—Ö—îπµΩëÖ∞π—Â¡îÄÙÙÙÄù—ïπÖπ–ú§Å…ï—’…∏Å—ïπÖπ—5ΩëÖ∞°Õ—Ö—îπ—ïπÖπ—Ãπô•πê†°—ïπÖπ–§ÄÙ¯ÅM—…•πú°—ïπÖπ–π•ê§ÄÙÙÙÅM—…•πú°Õ—Ö—îπµΩëÖ∞π•ê§§§Ï(ÄÄÄÅ•òÄ°Õ—Ö—îπµΩëÖ∞π—Â¡îÄÙÙÙÄù¡±Ö∏ú§Å…ï—’…∏Å¡±Öπ5ΩëÖ∞†§Ï(ÄÄÄÅ…ï—’…∏ÄúúÏ(ÄÅÙ((ÄÅô’πç—•Ω∏ÅÕ°ï±∞†§ÅÏ(ÄÄÄÅ…ï—’…∏ÅÄÒë•ÿÅç±ÖÕÃÙâÖ¡¿µÕ°ï±∞à¯ëÌÕ•ëïâÖ»†•ÙÒë•ÿÅç±ÖÕÃÙâ›Ω…≠Õ¡Öçîà¯ëÌ—Ω¡âÖ»†•ÙÒµÖ•∏Åç±ÖÕÃÙâçΩπ—ïπ–à¯ëÌÕ—Ö—îππΩ—•çîÄ¸ÅÄÒë•ÿÅç±ÖÕÃÙâπΩ—•çîÄëÌÕ—Ö—îππΩ—•çîπ—Â¡ïÙàÅ…Ω±îÙâÕ—Ö—’Ãà¯ÒÕ¡Ö∏¯ëÌÕ—Ö—îππΩ—•çîπ—Â¡îÄÙÙÙÄùï……Ω»úÄ¸ÄúÑúÄËÄüärLùÙΩÕ¡Ö∏¯ëÌïÕçÖ¡î°Õ—Ö—îππΩ—•çîπ—ï·–•ÙÒâ’——Ω∏ÅëÖ—ÑµÖç—•Ω∏Ùâë•Õµ•ÕÃµπΩ—•çîàÅÖ…•Ñµ±Öâï∞Ùâïç°Ö»à˚\Ωâ’——Ω∏¯Ωë•ÿ˘ÄÄËÄúùÙëÌÕ—Ö—îπ±ΩÖë•πúÄ¸ÄúÒë•ÿÅç±ÖÕÃÙâ±ΩÖë•πúà¯Ò§¯Ω§˘—’Ö±•ÈÖπëºÅΩ¡ï…áüçº∏∏∏Ωë•ÿ¯úÄËÄúùÙëÌÖç—•ŸïAÖùî†•ÙΩµÖ•∏¯Ωë•ÿ¯ëÌÕ—Ö—îπÕ•ëïâÖ…=¡ï∏Ä¸ÄúÒâ’——Ω∏Åç±ÖÕÃÙâÕ•ëïâÖ»µâÖç≠ë…Ω¿àÅëÖ—ÑµÖç—•Ω∏Ùâ—Ωùù±îµÕ•ëïâÖ»àÅÖ…•Ñµ±Öâï∞Ùâïç°Ö»Åµïπ‘à¯Ωâ’——Ω∏¯úÄËÄúùÙëÌµΩëÖ±Y•ï‹†•ÙΩë•ÿ˘ÄÏ(ÄÅÙ((ÄÅô’πç—•Ω∏Å…ïπëï»°ôΩç’Õ-ï‰ÄÙÄúú§ÅÏ(ÄÄÄÅ•òÄ†ÖçΩπô•ù’…ïê†§§ÅÏÅÖ¡¿π•ππï…!Q50ÄÙÅµ•ÕÕ•πùΩπô•ùY•ï‹†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅÖ¡¿π•ππï…!Q50ÄÙÅÕ—Ö—îπ’Õï»Ä¸ÅÕ°ï±∞†§ÄËÅ±Ωù•πY•ï‹†§Ï(ÄÄÄÅ•òÄ°ôΩç’Õ-ï‰§ÅÏ(ÄÄÄÄÄÅçΩπÕ–Å•π¡’–ÄÙÅëΩç’µïπ–π≈’ï…ÂMï±ïç—Ω»°ÅmëÖ—ÑµÕïÖ…ç†ÙàëÌôΩç’Õ-ïÂÙâuÄ§Ï(ÄÄÄÄÄÅ•òÄ°•π¡’–§ÅÏÅ•π¡’–πôΩç’Ã†§ÏÅ•π¡’–πÕï—Mï±ïç—•ΩπIÖπùî°•π¡’–πŸÖ±’îπ±ïπù—†∞Å•π¡’–πŸÖ±’îπ±ïπù—†§ÏÅÙ(ÄÄÄÅÙ(ÄÄÄÅëΩç’µïπ–πâΩë‰πç±ÖÕÕ1•Õ–π—Ωùù±î†ùµΩëÖ∞µΩ¡ï∏ú∞Å	ΩΩ±ïÖ∏°Õ—Ö—îπµΩëÖ∞§§Ï(ÄÅÙ((ÄÅÖÕÂπåÅô’πç—•Ω∏ÅÕÖôî°Öç—•Ω∏§ÅÏ(ÄÄÄÅ—…‰ÅÏÅÖ›Ö•–ÅÖç—•Ω∏†§ÏÅÙÅçÖ—ç†Ä°ï……Ω»§ÅÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅôÖ±ÕîÏÅÕ°Ω›9Ω—•çî°ï……Ω»πµïÕÕÖùîÅÒÄù=çΩ……ï‘Å’¥Åï……º∏ú∞Äùï……Ω»ú§ÏÅÙ(ÄÅÙ((ÄÅô’πç—•Ω∏ÅΩ¡ïπMïç—•Ω∏°Õïç—•Ω∏§ÅÏ(ÄÄÄÅÕ—Ö—îπÕïç—•Ω∏ÄÙÅÕïç—•Ω∏Ï(ÄÄÄÅÕ—Ö—îπÕ•ëïâÖ…=¡ï∏ÄÙÅôÖ±ÕîÏ(ÄÄÄÅÕ—Ö—îπù±ΩâÖ±E’ï…‰ÄÙÄúúÏ(ÄÄÄÅÕ—Ö—îπ±ΩÖë•πúÄÙÅ—…’îÏ(ÄÄÄÅ…ïπëï»†§Ï(ÄÄÄÅ…ï—’…∏Å±ΩÖëMïç—•Ω∏°Õïç—•Ω∏§πô•πÖ±±‰††§ÄÙ¯ÅÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅôÖ±ÕîÏÅ…ïπëï»†§ÏÅÙ§Ï(ÄÅÙ((ÄÅô’πç—•Ω∏ÅëΩ›π±ΩÖëÕÿ°≠•πê§ÅÏ(ÄÄÄÅçΩπÕ–ÅÕΩ’…çïQïπÖπ—ÃÄÙÅ≠•πêÄÙÙÙÄùÕ’âÕç…•¡—•ΩπÃú(ÄÄÄÄÄÄ¸ÅÕ—Ö—îπ—ïπÖπ—Ãπô•±—ï»†°—ïπÖπ–§ÄÙ¯ÅÏ(ÄÄÄÄÄÄÄÅçΩπÕ–ÅÕ’âÕç…•¡—•Ω∏ÄÙÅ—ïπÖπ–πÕ’âÕç…•¡—•ΩπÃ¸πl¡tÅÒÅÌÙÏ(ÄÄÄÄÄÄÄÅçΩπÕ–Å≈’ï…‰ÄÙÅÕ—Ö—îπô•±—ï…ÃπÕ’âÕç…•¡—•Ω∏Ï(ÄÄÄÄÄÄÄÅ…ï—’…∏Ä†Ö≈’ï…‰ÅÒÅ•πç±’ëïÃ°ÄëÌ—ïπÖπ–πô’±±}πÖµïÙÄëÌ—ïπÖπ–πïµÖ•±ÙÄëÌ—ïπÖπ–πÕ—Ω…ïÃ¸πµÖ¿†°Õ—Ω…î§ÄÙ¯ÅÕ—Ω…îππÖµî§π©Ω•∏†úÄú•ıÄ∞Å≈’ï…‰§§(ÄÄÄÄÄÄÄÄÄÄòòÄ°Õ—Ö—îπô•±—ï…ÃπÕ’âÕç…•¡—•ΩπM—Ö—’ÃÄÙÙÙÄùÖ±∞úÅÒÅÕ’âÕç…•¡—•Ω∏πÕ—Ö—’ÃÄÙÙÙÅÕ—Ö—îπô•±—ï…ÃπÕ’âÕç…•¡—•ΩπM—Ö—’Ã§Ï(ÄÄÄÄÄÅÙ§(ÄÄÄÄÄÄËÅÕ—Ö—îπ—ïπÖπ—Ãπô•±—ï»†°—ïπÖπ–§ÄÙ¯ÄÖÕ—Ö—îπô•±—ï…Ãπç’Õ—Ωµï»ÅÒÅ•πç±’ëïÃ°ÄëÌ—ïπÖπ–πô’±±}πÖµïÙÄëÌ—ïπÖπ–πïµÖ•±ÙÄëÌ—ïπÖπ–πÕ—Ω…ïÃ¸πµÖ¿†°Õ—Ω…î§ÄÙ¯ÅÕ—Ω…îππÖµî§π©Ω•∏†úÄú•ıÄ∞ÅÕ—Ö—îπô•±—ï…Ãπç’Õ—Ωµï»§§Ï(ÄÄÄÅçΩπÕ–Å…Ω›ÃÄÙÅ≠•πêÄÙÙÙÄùÕ’âÕç…•¡—•ΩπÃú(ÄÄÄÄÄÄ¸Åmlù±•ïπ—îú∞ÄùµÖ•∞ú∞Äù1Ω©Ñú∞ÄùA±Öπºú∞ÄùM—Ö—’Ãú∞ÄùYÖ±Ω»ÅµïπÕÖ∞ú∞ÄùIïπΩŸáüçºùt∞Ä∏∏πÕΩ’…çïQïπÖπ—ÃπµÖ¿†°—ïπÖπ–§ÄÙ¯ÅÏÅçΩπÕ–ÅÕ’âÕç…•¡—•Ω∏ÄÙÅ—ïπÖπ–πÕ’âÕç…•¡—•ΩπÃ¸πl¡tÅÒÅÌÙÏÅçΩπÕ–Å¡±Ö∏ÄÙÅ¡±Öπ	Â%ê°Õ’âÕç…•¡—•Ω∏π¡±Öπ}•ê§ÏÅ…ï—’…∏Åm—ïπÖπ–πô’±±}πÖµî∞Å—ïπÖπ–πïµÖ•∞∞Å—ïπÖπ–πÕ—Ω…ïÃ¸πl¡t¸ππÖµîÅÒÄúú∞Å¡±Ö∏¸ππÖµîÅÒÄúú∞ÅÕ’âÕç…•¡—•Ω∏πÕ—Ö—’ÃÅÒÄúú∞Å¡±Ö∏¸π¡…•çîÅÒÄ¿∞ÅÕ’âÕç…•¡—•Ω∏πç’……ïπ—}¡ï…•Ωë}ïπêÅÒÄúùtÏÅÙ•t(ÄÄÄÄÄÄËÅmlù±•ïπ—îú∞ÄùµÖ•∞ú∞Äù1Ω©ÖÃú∞ÄùM—Ö—’Ãú∞Äù…•ÖëºÅï¥ú∞Äüi±—•µºÅÖçïÕÕºùt∞Ä∏∏πÕΩ’…çïQïπÖπ—ÃπµÖ¿†°—ïπÖπ–§ÄÙ¯Åm—ïπÖπ–πô’±±}πÖµî∞Å—ïπÖπ–πïµÖ•∞∞Å—ïπÖπ–πÕ—Ω…ïÃ¸πµÖ¿†°Õ—Ω…î§ÄÙ¯ÅÕ—Ω…îππÖµî§π©Ω•∏†úÅÄú§ÅÒÄúú∞Å—ïπÖπ–πÕ’âÕç…•¡—•ΩπÃ¸πl¡t¸πÕ—Ö—’ÃÅÒÄúú∞Å—ïπÖπ–πç…ïÖ—ïë}Ö–ÅÒÄúú∞Å—ïπÖπ–π±ÖÕ—}Õ•ùπ}•π}Ö–ÅÒÄúùt•tÏ(ÄÄÄÅçΩπÕ–ÅçÕÿÄÙÅ…Ω›ÃπµÖ¿†°…Ω‹§ÄÙ¯Å…Ω‹πµÖ¿†°çï±∞§ÄÙ¯ÅÄàëÌM—…•πú°çï±∞Ä¸¸Äúú§π…ï¡±Öçï±∞†úàú∞Äúààú•ÙâÄ§π©Ω•∏†úÏú§§π©Ω•∏†ùq∏ú§Ï(ÄÄÄÅçΩπÕ–Åâ±ΩàÄÙÅπï‹Å	±Ωà°mÅq’ëÌçÕŸıÅt∞ÅÏÅ—Â¡îËÄù—ï·–ΩçÕÿÌç°Ö…Õï–ı’—ò¥‡úÅÙ§Ï(ÄÄÄÅçΩπÕ–Å’…∞ÄÙÅUI0πç…ïÖ—ï=â©ïç—UI0°â±Ωà§Ï(ÄÄÄÅçΩπÕ–Å±•π¨ÄÙÅëΩç’µïπ–πç…ïÖ—ï±ïµïπ–†ùÑú§Ï(ÄÄÄÅ±•π¨π°…ïòÄÙÅ’…∞Ï(ÄÄÄÅ±•π¨πëΩ›π±ΩÖêÄÙÅÅç°ïôΩÃ¥ëÌ≠•πëÙ¥ëÌπï‹ÅÖ—î†§π—Ω%M=M—…•πú†§πÕ±•çî†¿∞Äƒ¿•ÙπçÕŸÄÏ(ÄÄÄÅ±•π¨πç±•ç¨†§Ï(ÄÄÄÅUI0π…ïŸΩ≠ï=â©ïç—UI0°’…∞§Ï(ÄÄÄÅÕ°Ω›9Ω—•çî†ù…≈’•ŸºÅMXÅ¡…ï¡Ö…ÖëºÅçΩ¥ÅÕ’çïÕÕº∏ú§Ï(ÄÅÙ((ÄÅëΩç’µïπ–πÖëëŸïπ—1•Õ—ïπï»†ùÕ’âµ•–ú∞Ä°ïŸïπ–§ÄÙ¯ÅÕÖôî°ÖÕÂπåÄ†§ÄÙ¯ÅÏ(ÄÄÄÅçΩπÕ–ÅôΩ…¥ÄÙÅïŸïπ–π—Ö…ùï–πç±ΩÕïÕ–†ùôΩ…¥ú§Ï(ÄÄÄÅ•òÄ†ÖôΩ…¥§Å…ï—’…∏Ï(ÄÄÄÅïŸïπ–π¡…ïŸïπ—ïôÖ’±–†§Ï(ÄÄÄÅçΩπÕ–ÅŸÖ±’ïÃÄÙÅ=â©ïç–πô…Ωµπ—…•ïÃ°πï‹ÅΩ…µÖ—Ñ°ôΩ…¥§§Ï(ÄÄÄÅ•òÄ°ôΩ…¥πëÖ—ÖÕï–πôΩ…¥ÄÙÙÙÄù±Ωù•∏ú§ÅÏ(ÄÄÄÄÄÅÕ—Ö—îπ±ΩÖë•πúÄÙÅ—…’îÏÅ…ïπëï»†§Ï(ÄÄÄÄÄÅÖ›Ö•–ÅÕ•ùπ%∏°ŸÖ±’ïÃπïµÖ•∞∞ÅŸÖ±’ïÃπ¡ÖÕÕ›Ω…ê§Ï(ÄÄÄÄÄÅÖ›Ö•–Å±ΩÖëΩ…î†§Ï(ÄÄÄÄÄÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°ôΩ…¥πëÖ—ÖÕï–πôΩ…¥ÄÙÙÙÄùÕ’âÕç…•¡—•Ω∏ú§ÅÏ(ÄÄÄÄÄÅçΩπÕ–Åç’……ïπ—Aï…•ΩëπêÄÙÅŸÖ±’ïÃπç’……ïπ—Aï…•ΩëπêÄ¸Åπï‹ÅÖ—î°ÄëÌŸÖ±’ïÃπç’……ïπ—Aï…•ΩëπëıP»ÃË‘‰Ë‘ÂÄ§π—Ω%M=M—…•πú†§ÄËÅ’πëïô•πïêÏ(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏ΩÕ’âÕç…•¡—•ΩπÃú∞ÅÏÅµï—°ΩêËÄùA=MPú∞ÅâΩë‰ËÅÏÅ’Õï…%êËÅŸÖ±’ïÃπ’Õï…%ê∞ÅÕ—Ö—’ÃËÅŸÖ±’ïÃπÕ—Ö—’Ã∞Å¡±Öπ%êËÅŸÖ±’ïÃπ¡±Öπ%ê∞Åç’……ïπ—Aï…•ΩëπêÅÙÅÙ§Ï(ÄÄÄÄÄÅÕ—Ö—îπµΩëÖ∞ÄÙÅπ’±∞Ï(ÄÄÄÄÄÅÖ›Ö•–Å±ΩÖëΩ…î†§Ï(ÄÄÄÄÄÅÕ°Ω›9Ω—•çî†ùÕÕ•πÖ—’…ÑÅÖ—’Ö±•ÈÖëÑÅçΩ¥ÅÕ’çïÕÕº∏ú§Ï(ÄÄÄÄÄÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°ôΩ…¥πëÖ—ÖÕï–πôΩ…¥ÄÙÙÙÄù¡±Ö∏ú§ÅÏ(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω¡±ÖπÃú∞ÅÏÅµï—°ΩêËÄùA=MPú∞ÅâΩë‰ËÅÏÅ¡±Ö∏ËÅÏÅπÖµîËÅŸÖ±’ïÃππÖµî∞ÅÕ±’úËÅŸÖ±’ïÃπÕ±’ú∞Å¡…•çîËÅ9’µâï»°ŸÖ±’ïÃπ¡…•çî§∞Å—…•Ö±}¡ï…•Ωë}ëÖÂÃËÅ9’µâï»°ŸÖ±’ïÃπ—…•Ö∞§∞ÅµÖ·}Õ—Ω…ïÃËÅ9’µâï»°ŸÖ±’ïÃπÕ—Ω…ïÃ§ÅÙ∞Å¡ï…µ•ÕÕ•ΩπÃËÅM—…•πú°ŸÖ±’ïÃπ¡ï…µ•ÕÕ•ΩπÃÅÒÄúú§πÕ¡±•–†ú∞ú§πµÖ¿†°•—ï¥§ÄÙ¯Å•—ï¥π—…•¥†§§πô•±—ï»°	ΩΩ±ïÖ∏§ÅÙÅÙ§Ï(ÄÄÄÄÄÅÕ—Ö—îπ¡±ÖπÃÄÙÄ°Ö›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω¡±ÖπÃú§§πëÖ—ÑÅÒÅmtÏ(ÄÄÄÄÄÅÕ—Ö—îπµΩëÖ∞ÄÙÅπ’±∞Ï(ÄÄÄÄÄÅÕ°Ω›9Ω—•çî†ùA±ÖπºÅç…•ÖëºÅçΩ¥ÅÕ’çïÕÕº∏ú§Ï(ÄÄÄÄÄÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°ôΩ…¥πëÖ—ÖÕï–πôΩ…¥ÄÙÙÙÄù…ï¡±‰ú§ÅÏ(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏ΩµïÕÕÖùïÃú∞ÅÏÅµï—°ΩêËÄùA=MPú∞ÅâΩë‰ËÅÏÅ—•ç≠ï—}•êËÅôΩ…¥πëÖ—ÖÕï–π—•ç≠ï–∞Å—ï·–ËÅŸÖ±’ïÃπ—ï·–∞ÅÕ—Ö—’Õ}’¡ëÖ—îËÅŸÖ±’ïÃπÕ—Ö—’ÃÅÙÅÙ§Ï(ÄÄÄÄÄÅÕ—Ö—îπ—•ç≠ï—ÃÄÙÄ°Ö›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω—•ç≠ï—Ãú§§πëÖ—ÑÅÒÅmtÏ(ÄÄÄÄÄÅÕ°Ω›9Ω—•çî†ùIïÕ¡ΩÕ—ÑÅïπŸ•ÖëÑÅÖºÅç±•ïπ—î∏ú§Ï(ÄÄÄÄÄÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°ôΩ…¥πëÖ—ÖÕï–πôΩ…¥ÄÙÙÙÄù¡…ΩŸ•Õ•Ω∏ú§ÅÏ(ÄÄÄÄÄÅÕ—Ö—îπ±ΩÖë•πúÄÙÅ—…’îÏÅ…ïπëï»†§Ï(ÄÄÄÄÄÅçΩπÕ–Å…ïÕ’±–ÄÙÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω¡…ΩŸ•Õ•Ω∏µ—ïπÖπ–ú∞ÅÏÅµï—°ΩêËÄùA=MPú∞ÅâΩë‰ËÅŸÖ±’ïÃÅÙ§Ï(ÄÄÄÄÄÅÖ›Ö•–Å±ΩÖëΩ…î†§Ï(ÄÄÄÄÄÅÕ°Ω›9Ω—•çî°Å±•ïπ—îÅç…•Öëº∏Å°ÖŸîÅëîÅ•π—ïù…áüçºËÄëÌ…ïÕ’±–π—ïπÖπ–πÖ¡•-ïÂıÄ§Ï(ÄÄÄÄÄÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°ôΩ…¥πëÖ—ÖÕï–πôΩ…¥ÄÙÙÙÄùÖëµ•∏ú§ÅÏ(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏ΩÖëµ•π•Õ—…Ö—Ω…Ãú∞ÅÏÅµï—°ΩêËÄùA=MPú∞ÅâΩë‰ËÅŸÖ±’ïÃÅÙ§Ï(ÄÄÄÄÄÅÕ—Ö—îπÖëµ•πÃÄÙÄ°Ö›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏ΩÖëµ•π•Õ—…Ö—Ω…Ãú§§πëÖ—ÑÅÒÅmtÏ(ÄÄÄÄÄÅÕ°Ω›9Ω—•çî†ùëµ•π•Õ—…ÖëΩ»ÅÖ’—Ω…•ÈÖëº∏ú§Ï(ÄÄÄÅÙ(ÄÅÙ§§Ï((ÄÅëΩç’µïπ–πÖëëŸïπ—1•Õ—ïπï»†ùç±•ç¨ú∞Ä°ïŸïπ–§ÄÙ¯ÅÕÖôî°ÖÕÂπåÄ†§ÄÙ¯ÅÏ(ÄÄÄÅçΩπÕ–Å—Ö…ùï–ÄÙÅïŸïπ–π—Ö…ùï–πç±ΩÕïÕ–†ùmëÖ—ÑµÖç—•Ωπtú§Ï(ÄÄÄÅ•òÄ†Ö—Ö…ùï–§Å…ï—’…∏Ï(ÄÄÄÅçΩπÕ–ÅÖç—•Ω∏ÄÙÅ—Ö…ùï–πëÖ—ÖÕï–πÖç—•Ω∏Ï(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù±ΩùΩ’–ú§Å…ï—’…∏ÅÕ•ùπ=’–†§Ï(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùÕïç—•Ω∏úÅÒÅÖç—•Ω∏ÄÙÙÙÄùçΩµµÖπêµÕïç—•Ω∏ú§Å…ï—’…∏ÅΩ¡ïπMïç—•Ω∏°—Ö…ùï–πëÖ—ÖÕï–πÕïç—•Ω∏§Ï(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùô•±—ï…ïêµÕïç—•Ω∏ú§ÅÏÅÕ—Ö—îπô•±—ï…ÃπÕ’âÕç…•¡—•ΩπM—Ö—’ÃÄÙÅ—Ö…ùï–πëÖ—ÖÕï–πô•±—ï»ÏÅ…ï—’…∏ÅΩ¡ïπMïç—•Ω∏°—Ö…ùï–πëÖ—ÖÕï–πÕïç—•Ω∏§ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù—Ωùù±îµÕ•ëïâÖ»ú§ÅÏÅÕ—Ö—îπÕ•ëïâÖ…=¡ï∏ÄÙÄÖÕ—Ö—îπÕ•ëïâÖ…=¡ï∏ÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù…ïô…ïÕ†ú§Å…ï—’…∏Å±ΩÖëΩ…î†§Ï(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùë•Õµ•ÕÃµπΩ—•çîú§ÅÏÅÕ—Ö—îππΩ—•çîÄÙÅπ’±∞ÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùç±ΩÕîµµΩëÖ∞ú§ÅÏÅÕ—Ö—îπµΩëÖ∞ÄÙÅπ’±∞ÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùΩ¡ï∏µ¡±Ö∏ú§ÅÏÅÕ—Ö—îπµΩëÖ∞ÄÙÅÏÅ—Â¡îËÄù¡±Ö∏úÅÙÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùΩ¡ï∏µ¡…ΩŸ•Õ•Ω∏ú§Å…ï—’…∏ÅΩ¡ïπMïç—•Ω∏†ù¡…ΩŸ•Õ•Ω∏ú§Ï(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùΩ¡ï∏µ—ïπÖπ–ú§ÅÏÅÕ—Ö—îπù±ΩâÖ±E’ï…‰ÄÙÄúúÏÅÕ—Ö—îπµΩëÖ∞ÄÙÅÏÅ—Â¡îËÄù—ïπÖπ–ú∞Å•êËÅ—Ö…ùï–πëÖ—ÖÕï–π•êÅÙÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùïë•–µÕ’âÕç…•¡—•Ω∏ú§ÅÏÅÕ—Ö—îπµΩëÖ∞ÄÙÅÏÅ—Â¡îËÄùÕ’âÕç…•¡—•Ω∏ú∞Å•êËÅ—Ö…ùï–πëÖ—ÖÕï–π•êÅÙÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù—ïπÖπ–µçÖ—Ö±Ωúú§ÅÏÅÕ—Ö—îπµΩëÖ∞ÄÙÅπ’±∞ÏÅÕ—Ö—îπÕï±ïç—ïëQïπÖπ–ÄÙÅ—Ö…ùï–πëÖ—ÖÕï–π•êÏÅ…ï—’…∏ÅΩ¡ïπMïç—•Ω∏†ùçÖ—Ö±Ωúú§ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùï·¡Ω…–ú§ÅÏÅëΩ›π±ΩÖëÕÿ°—Ö…ùï–πëÖ—ÖÕï–π≠•πê§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù—•ç≠ï–µô•±—ï»ú§ÅÏÅÕ—Ö—îπô•±—ï…Ãπ—•ç≠ï—M—Ö—’ÃÄÙÅ—Ö…ùï–πëÖ—ÖÕï–πŸÖ±’îÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùÕï±ïç–µ—•ç≠ï–ú§ÅÏÅÕ—Ö—îπÕï±ïç—ïëQ•ç≠ï—%êÄÙÅ—Ö…ùï–πëÖ—ÖÕï–π•êÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùΩ¡ï∏µ—•ç≠ï–ú§ÅÏÅÕ—Ö—îπÕï±ïç—ïëQ•ç≠ï—%êÄÙÅ—Ö…ùï–πëÖ—ÖÕï–π•êÏÅ…ï—’…∏ÅΩ¡ïπMïç—•Ω∏†ùÕ’¡¡Ω…–ú§ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù…ï±ΩÖêµ—•ç≠ï—Ãú§ÅÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅ—…’îÏÅ…ïπëï»†§ÏÅÖ›Ö•–Å±ΩÖëMïç—•Ω∏†ùÕ’¡¡Ω…–ú∞Å—…’î§ÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅôÖ±ÕîÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù…ïÕΩ±Ÿîµ—•ç≠ï–ú§ÅÏ(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω—•ç≠ï—Ãú∞ÅÏÅµï—°ΩêËÄùAUPú∞ÅâΩë‰ËÅÏÅ•êËÅ—Ö…ùï–πëÖ—ÖÕï–π•ê∞Å’¡ëÖ—ïÃËÅÏÅÕ—Ö—’ÃËÄù…ïÕΩ±ŸïêúÅÙÅÙÅÙ§Ï(ÄÄÄÄÄÅÕ—Ö—îπ—•ç≠ï—ÃÄÙÄ°Ö›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω—•ç≠ï—Ãú§§πëÖ—ÑÅÒÅmtÏ(ÄÄÄÄÄÅÕ°Ω›9Ω—•çî†ù°ÖµÖëºÅµÖ…çÖëºÅçΩµºÅ…ïÕΩ±Ÿ•ëº∏ú§Ï(ÄÄÄÄÄÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù…ï±ΩÖêµ°ïÖ±—†ú§ÅÏÅÕ—Ö—îπ°ïÖ±—†ÄÙÅπ’±∞ÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅ—…’îÏÅ…ïπëï»†§ÏÅÖ›Ö•–Å±ΩÖëMïç—•Ω∏†ù°ïÖ±—†ú∞Å—…’î§ÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅôÖ±ÕîÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù…ï±ΩÖêµ±ΩùÃú§ÅÏÅÕ—Ö—îπ±ΩùÃÄÙÅπ’±∞ÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅ—…’îÏÅ…ïπëï»†§ÏÅÖ›Ö•–Å±ΩÖëMïç—•Ω∏†ù±ΩùÃú∞Å—…’î§ÏÅÕ—Ö—îπ±ΩÖë•πúÄÙÅôÖ±ÕîÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄù—Ωùù±îµµïπ‘ú§ÅÏ(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω—ïπÖπ–µµïπ‘ú∞ÅÏÅµï—°ΩêËÄùAUPú∞ÅâΩë‰ËÅÏÅ•êËÅ—Ö…ùï–πëÖ—ÖÕï–π•ê∞Å’¡ëÖ—ïÃËÅÏÅ•Õ}ÖŸÖ•±Öâ±îËÅ—Ö…ùï–πëÖ—ÖÕï–πÖŸÖ•±Öâ±îÄÑÙÙÄù—…’îúÅÙÅÙÅÙ§Ï(ÄÄÄÄÄÅÖ›Ö•–Å±ΩÖëMïç—•Ω∏†ùçÖ—Ö±Ωúú§ÏÅ…ïπëï»†§ÏÅÕ°Ω›9Ω—•çî†ù•Õ¡Ωπ•â•±•ëÖëîÅÖ—’Ö±•ÈÖëÑ∏ú§ÏÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùëï±ï—îµ¡±Ö∏ú§ÅÏ(ÄÄÄÄÄÅ•òÄ†ÖçΩπô•…¥†ù·ç±’•»ÅïÕ—îÅ¡±Öπº¸ÅÕÕ•πÖ—’…ÖÃÅŸ•πç’±ÖëÖÃÅ¡Ωëï¥Å•µ¡ïë•»ÅÑÅï·ç±’œçº∏ú§§Å…ï—’…∏Ï(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω¡±ÖπÃú∞ÅÏÅµï—°ΩêËÄù1Qú∞ÅâΩë‰ËÅÏÅ•êËÅ—Ö…ùï–πëÖ—ÖÕï–π•êÅÙÅÙ§Ï(ÄÄÄÄÄÅÕ—Ö—îπ¡±ÖπÃÄÙÄ°Ö›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏Ω¡±ÖπÃú§§πëÖ—ÑÅÒÅmtÏÅÕ°Ω›9Ω—•çî†ùA±ÖπºÅï·ç±◊µëº∏ú§ÏÅ…ï—’…∏Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°Öç—•Ω∏ÄÙÙÙÄùëï±ï—îµÖëµ•∏ú§ÅÏ(ÄÄÄÄÄÅ•òÄ†ÖçΩπô•…¥°ÅIïµΩŸï»ÄëÌ—Ö…ùï–πëÖ—ÖÕï–πïµÖ•±ÙÅëºÅΩπ—…Ω∞Åïπ—ï»˝Ä§§Å…ï—’…∏Ï(ÄÄÄÄÄÅÖ›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏ΩÖëµ•π•Õ—…Ö—Ω…Ãú∞ÅÏÅµï—°ΩêËÄù1Qú∞ÅâΩë‰ËÅÏÅïµÖ•∞ËÅ—Ö…ùï–πëÖ—ÖÕï–πïµÖ•∞ÅÙÅÙ§Ï(ÄÄÄÄÄÅÕ—Ö—îπÖëµ•πÃÄÙÄ°Ö›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏ΩÖëµ•π•Õ—…Ö—Ω…Ãú§§πëÖ—ÑÅÒÅmtÏÅÕ°Ω›9Ω—•çî†ùçïÕÕºÅ…ïµΩŸ•ëº∏ú§Ï(ÄÄÄÅÙ(ÄÅÙ§§Ï((ÄÅëΩç’µïπ–πÖëëŸïπ—1•Õ—ïπï»†ù•π¡’–ú∞Ä°ïŸïπ–§ÄÙ¯ÅÏ(ÄÄÄÅçΩπÕ–Å•π¡’–ÄÙÅïŸïπ–π—Ö…ùï–πç±ΩÕïÕ–†ùmëÖ—ÑµÕïÖ…ç°tú§Ï(ÄÄÄÅ•òÄ†Ö•π¡’–§Å…ï—’…∏Ï(ÄÄÄÅçΩπÕ–Å≠ï‰ÄÙÅ•π¡’–πëÖ—ÖÕï–πÕïÖ…ç†Ï(ÄÄÄÅ•òÄ°≠ï‰ÄÙÙÙÄùù±ΩâÖ∞ú§ÅÕ—Ö—îπù±ΩâÖ±E’ï…‰ÄÙÅ•π¡’–πŸÖ±’îÏ(ÄÄÄÅï±ÕîÅÕ—Ö—îπô•±—ï…Õm≠ïÂtÄÙÅ•π¡’–πŸÖ±’îÏ(ÄÄÄÅ…ïπëï»°≠ï‰§Ï(ÄÅÙ§Ï((ÄÅëΩç’µïπ–πÖëëŸïπ—1•Õ—ïπï»†ùç°Öπùîú∞Ä°ïŸïπ–§ÄÙ¯ÅÕÖôî°ÖÕÂπåÄ†§ÄÙ¯ÅÏ(ÄÄÄÅçΩπÕ–Åô•±—ï»ÄÙÅïŸïπ–π—Ö…ùï–πç±ΩÕïÕ–†ùmëÖ—Ñµô•±—ï…tú§Ï(ÄÄÄÅ•òÄ°ô•±—ï»§ÅÏÅÕ—Ö—îπô•±—ï…Õmô•±—ï»πëÖ—ÖÕï–πô•±—ï…tÄÙÅô•±—ï»πŸÖ±’îÏÅ…ïπëï»†§ÏÅ…ï—’…∏ÏÅÙ(ÄÄÄÅçΩπÕ–ÅÕï±ïç–ÄÙÅïŸïπ–π—Ö…ùï–πç±ΩÕïÕ–†ùmëÖ—ÑµÖç—•Ω∏ÙâÕï±ïç–µ—ïπÖπ–âtú§Ï(ÄÄÄÅ•òÄ†ÖÕï±ïç–§Å…ï—’…∏Ï(ÄÄÄÅÕ—Ö—îπÕï±ïç—ïëQïπÖπ–ÄÙÅÕï±ïç–πŸÖ±’îÏ(ÄÄÄÅÕ—Ö—îπ±ΩÖë•πúÄÙÅ—…’îÏÅ…ïπëï»†§Ï(ÄÄÄÅÖ›Ö•–Å±ΩÖëMïç—•Ω∏†ùçÖ—Ö±Ωúú§Ï(ÄÄÄÅÕ—Ö—îπ±ΩÖë•πúÄÙÅôÖ±ÕîÏÅ…ïπëï»†§Ï(ÄÅÙ§§Ï((ÄÅëΩç’µïπ–πÖëëŸïπ—1•Õ—ïπï»†ù≠ïÂëΩ›∏ú∞Ä°ïŸïπ–§ÄÙ¯ÅÏ(ÄÄÄÅ•òÄ†°ïŸïπ–πç—…±-ï‰ÅÒÅïŸïπ–πµï—Ö-ï‰§ÄòòÅïŸïπ–π≠ï‰π—Ω1Ω›ï…ÖÕî†§ÄÙÙÙÄù¨ú§ÅÏ(ÄÄÄÄÄÅïŸïπ–π¡…ïŸïπ—ïôÖ’±–†§Ï(ÄÄÄÄÄÅëΩç’µïπ–π≈’ï…ÂMï±ïç—Ω»†ùmëÖ—ÑµÕïÖ…ç†Ùâù±ΩâÖ∞âtú§¸πôΩç’Ã†§Ï(ÄÄÄÅÙ(ÄÄÄÅ•òÄ°ïŸïπ–π≠ï‰ÄÙÙÙÄùÕçÖ¡îú§ÅÏ(ÄÄÄÄÄÅÕ—Ö—îπµΩëÖ∞ÄÙÅπ’±∞Ï(ÄÄÄÄÄÅÕ—Ö—îπÕ•ëïâÖ…=¡ï∏ÄÙÅôÖ±ÕîÏ(ÄÄÄÄÄÅÕ—Ö—îπù±ΩâÖ±E’ï…‰ÄÙÄúúÏ(ÄÄÄÄÄÅ…ïπëï»†§Ï(ÄÄÄÅÙ(ÄÅÙ§Ï((ÄÅÖÕÂπåÅô’πç—•Ω∏ÅâΩΩ–†§ÅÏ(ÄÄÄÅ…ïπëï»†§Ï(ÄÄÄÅ•òÄ†ÖçΩπô•ù’…ïê†§ÅÒÄÖÕ—Ö—îπ—Ω≠ï∏§Å…ï—’…∏Ï(ÄÄÄÅ—…‰ÅÏ(ÄÄÄÄÄÅÕ—Ö—îπ’Õï»ÄÙÄ°Ö›Ö•–ÅÖ¡§†úΩÖ¡§ΩÖëµ•∏ΩÕïÕÕ•Ω∏ú§§πëÖ—ÑÏ(ÄÄÄÄÄÅÖ›Ö•–Å±ΩÖëΩ…î†§Ï(ÄÄÄÅÙÅçÖ—ç†ÅÏ(ÄÄÄÄÄÅÖ›Ö•–ÅÕ•ùπ=’–†§Ï(ÄÄÄÄÄÅÕ°Ω›9Ω—•çî†ùM’ÑÅÕïÕœçºÅï·¡•…Ω‘∏Åπ—…îÅπΩŸÖµïπ—î∏ú∞Äùï……Ω»ú§Ï(ÄÄÄÅÙ(ÄÅÙ((ÄÅâΩΩ–†§Ï)Ù§†§Ï(
+      </div>
+      <div class="overview-grid">
+        <section class="panel revenue-panel">
+          <div class="panel-heading"><div><p class="eyebrow">ASSINATURAS</p><h2>Sa√∫de da receita</h2></div><button class="text-button" data-action="section" data-section="subscriptions">Ver assinaturas ‚Üí</button></div>
+          <div class="revenue-hero"><span><small>MRR ATUAL</small><strong>${money(data.mrr)}</strong></span><span><small>RENOVA√á√ïES EM 7 DIAS</small><strong>${data.renewalsNext7Days || 0}</strong></span></div>
+          <div class="distribution-bar" aria-label="Distribui√ß√£o das assinaturas">
+            ${Object.entries(subscriptions).map(([key, value]) => `<i class="segment segment-${key}" style="width:${totalSubscriptions ? (value / totalSubscriptions) * 100 : 0}%" title="${key}: ${value}"></i>`).join('')}
+          </div>
+          <div class="distribution-legend">${Object.entries(subscriptions).map(([key, value]) => `<span>${status(key)}<strong>${value}</strong></span>`).join('') || '<p class="empty-inline">Ainda n√£o h√° assinaturas.</p>'}</div>
+        </section>
+        <section class="panel attention-panel"><div class="panel-heading"><div><p class="eyebrow">AGORA</p><h2>Pontos de aten√ß√£o</h2></div></div><div class="attention-list">${alerts.join('')}</div></section>
+      </div>
+      <div class="overview-grid lower">
+        <section class="panel compact-table"><div class="panel-heading"><div><p class="eyebrow">CLIENTES</p><h2>Entradas recentes</h2></div><button class="text-button" data-action="section" data-section="tenants">Ver todos ‚Üí</button></div>
+          <div class="recent-list">${recent.map((tenant) => { const subscription = tenant.subscriptions?.[0] || {}; return `<button data-action="open-tenant" data-id="${tenant.id}"><span class="avatar">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span>${status(subscription.status)}<time>${relative(tenant.created_at || tenant.updated_at)}</time></button>`; }).join('') || '<p class="empty">Nenhum cliente cadastrado.</p>'}</div>
+        </section>
+        <section class="panel support-snapshot"><div class="panel-heading"><div><p class="eyebrow">SUPORTE</p><h2>Fila priorit√°ria</h2></div><button class="text-button" data-action="section" data-section="support">Central de suporte ‚Üí</button></div>
+          <div class="snapshot-list">${attentionTickets.map((ticket) => `<button data-action="open-ticket" data-id="${ticket.id}"><span>${priority(ticket.priority)}<strong>${escape(ticket.subject || 'Sem assunto')}</strong><small>${escape(ticket.client_name)} ¬∑ ${relative(ticket.updated_at || ticket.created_at)}</small></span>${status(ticket.status)}</button>`).join('') || '<div class="all-clear compact"><i>‚úì</i><span><strong>Caixa de entrada vazia</strong><small>Nenhum chamado pendente.</small></span></div>'}</div>
+        </section>
+      </div>
+    </section>`;
+  }
+
+  function subscriptions() {
+    const query = state.filters.subscription;
+    const filter = state.filters.subscriptionStatus;
+    const rows = state.tenants.map((tenant) => ({ tenant, subscription: tenant.subscriptions?.[0] || {} }))
+      .filter(({ tenant, subscription }) => (!query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query)) && (filter === 'all' || subscription.status === filter));
+    const totalMrr = rows.filter(({ subscription }) => subscription.status === 'active').reduce((sum, { subscription }) => sum + Number(planById(subscription.plan_id)?.price || 0), 0);
+    const dueSoon = rows.filter(({ subscription }) => { const diff = new Date(subscription.current_period_end).getTime() - Date.now(); return diff >= 0 && diff <= 7 * 86400000; }).length;
+    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">‚Üì Exportar CSV</button><button class="primary" data-action="open-provision">Ôºã Nova assinatura</button>`;
+    return `<section class="page">
+      ${pageHeader('RECEITA E ACESSO', 'Assinaturas', 'Controle planos, vencimentos e o acesso de cada opera√ß√£o ChefOS.', actions)}
+      <div class="summary-strip"><div><span>MRR nesta vis√£o</span><strong>${money(totalMrr)}</strong></div><div><span>Assinaturas exibidas</span><strong>${rows.length}</strong></div><div><span>Renovam em 7 dias</span><strong>${dueSoon}</strong></div><div class="danger-text"><span>Inadimplentes</span><strong>${rows.filter(({ subscription }) => subscription.status === 'past_due').length}</strong></div></div>
+      <div class="data-toolbar"><div class="search-field"><span>‚åï</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
+      <div class="panel table-wrap"><table><thead><tr><th>Cliente / opera√ß√£o</th><th>Plano</th><th>Status</th><th>Valor mensal</th><th>Pr√≥xima renova√ß√£o</th><th></th></tr></thead><tbody>
+        ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${tenant.id}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td><strong>${money(plan?.price)}</strong><small>por m√™s</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td><button class="row-action" data-action="edit-subscription" data-id="${tenant.id}">Gerenciar</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
+      </tbody></table></div>
+    </section>`;
+  }
+
+  function tenants() {
+    const query = state.filters.customer;
+    const rows = state.tenants.filter((tenant) => !query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query));
+    const actions = `<button class="secondary" data-action="export" data-kind="customers">‚Üì Exportar CSV</button><button class="primary" data-action="open-provision">Ôºã Novo cliente</button>`;
+    return `<section class="page">
+      ${pageHeader('BASE DE CLIENTES', 'Clientes e opera√ß√µes', 'Uma vis√£o √∫nica de propriet√°rios, lojas, atividade e acesso.', actions)}
+      <div class="data-toolbar"><div class="search-field"><span>‚åï</span><input data-search="customer" value="${escape(query)}" placeholder="Buscar por nome, e-mail ou loja" /></div><span class="result-count">${rows.length} cliente(s)</span></div>
+      <div class="panel table-wrap"><table><thead><tr><th>Cliente</th><th>Opera√ß√µes</th><th>Assinatura</th><th>√öltima atividade</th><th>Desde</th><th></th></tr></thead><tbody>
+        ${rows.map((tenant) => { const subscription = tenant.subscriptions?.[0] || {}; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${tenant.id}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.email)}</small></span></button></td><td><strong>${tenant.stores?.length || 0} opera√ß√£o(√µes)</strong><small>${escape(tenant.stores?.map((store) => store.name).join(', ') || 'Nenhuma loja')}</small></td><td>${status(subscription.status)}</td><td><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong><small>${date(tenant.last_sign_in_at || tenant.updated_at)}</small></td><td>${day(tenant.created_at)}</td><td><button class="row-action" data-action="open-tenant" data-id="${tenant.id}">Ver cliente</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Nenhum cliente encontrado.</td></tr>'}
+      </tbody></table></div>
+    </section>`;
+  }
+
+  function filteredTickets() {
+    const query = state.filters.ticket;
+    const filter = state.filters.ticketStatus;
+    return (state.tickets || []).filter((ticket) => {
+      const matchesQuery = !query || includes(`${ticket.subject} ${ticket.client_name} ${ticket.store_name}`, query);
+      const matchesStatus = filter === 'all' || (filter === 'active' ? ticket.status !== 'resolved' : ticket.status === filter);
+      return matchesQuery && matchesStatus;
+    });
+  }
+
+  function support() {
+    const tickets = filteredTickets();
+    if (tickets.length && !tickets.some((ticket) => String(ticket.id) === String(state.selectedTicketId))) state.selectedTicketId = tickets[0].id;
+    const selected = (state.tickets || []).find((ticket) => String(ticket.id) === String(state.selectedTicketId));
+    const messages = selected?.messages || [];
+    return `<section class="page support-page">
+      ${pageHeader('ATENDIMENTO AO CLIENTE', 'Central de suporte', 'Priorize, responda e acompanhe cada conversa at√© a resolu√ß√£o.', `<button class="secondary" data-action="reload-tickets">‚Üª Atualizar fila</button>`)}
+      <div class="support-workspace panel">
+        <aside class="ticket-queue">
+          <div class="queue-head"><div><h2>Caixa de entrada</h2><span>${tickets.filter((ticket) => ticket.status !== 'resolved').length} pendente(s)</span></div><div class="search-field compact"><span>‚åï</span><input data-search="ticket" value="${escape(state.filters.ticket)}" placeholder="Buscar chamado" /></div><div class="filter-tabs"><button class="${state.filters.ticketStatus === 'active' ? 'active' : ''}" data-action="ticket-filter" data-value="active">Ativos</button><button class="${state.filters.ticketStatus === 'open' ? 'active' : ''}" data-action="ticket-filter" data-value="open">Novos</button><button class="${state.filters.ticketStatus === 'resolved' ? 'active' : ''}" data-action="ticket-filter" data-value="resolved">Resolvidos</button><button class="${state.filters.ticketStatus === 'all' ? 'active' : ''}" data-action="ticket-filter" data-value="all">Todos</button></div></div>
+          <div class="queue-list">${tickets.map((ticket) => `<button class="queue-item ${String(ticket.id) === String(state.selectedTicketId) ? 'active' : ''}" data-action="select-ticket" data-id="${ticket.id}"><div><span class="avatar small">${initials(ticket.client_name)}</span><strong>${escape(ticket.client_name)}</strong><time>${relative(ticket.updated_at || ticket.created_at)}</time></div><h3>${escape(ticket.subject || 'Sem assunto')}</h3><p>${escape(ticket.messages?.at(-1)?.text || ticket.store_name || 'Aguardando primeira mensagem')}</p><footer>${priority(ticket.priority)}${status(ticket.status)}</footer></button>`).join('') || '<p class="empty">Nenhum chamado nesta fila.</p>'}</div>
+        </aside>
+        <section class="conversation">${selected ? `<header class="conversation-head"><div><span class="avatar">${initials(selected.client_name)}</span><span><h2>${escape(selected.subject || 'Sem assunto')}</h2><p>${escape(selected.client_name)} ¬∑ ${escape(selected.store_name || 'Geral')}</p></span></div><div>${priority(selected.priority)}${status(selected.status)}${selected.status !== 'resolved' ? `<button class="secondary small-button" data-action="resolve-ticket" data-id="${selected.id}">‚úì Resolver</button>` : ''}</div></header>
+          <div class="conversation-meta"><span><small>CRIADO</small><strong>${date(selected.created_at)}</strong></span><span><small>√öLTIMA ATUALIZA√á√ÉO</small><strong>${relative(selected.updated_at || selected.created_at)}</strong></span><span><small>MENSAGENS</small><strong>${messages.length}</strong></span></div>
+          <div class="messages">${messages.map((message) => `<article class="message ${message.sender_type === 'admin' ? 'mine' : ''}"><span class="message-avatar">${message.sender_type === 'admin' ? 'C' : initials(selected.client_name)}</span><div><header><strong>${message.sender_type === 'admin' ? 'Equipe ChefOS' : escape(selected.client_name)}</strong><time>${date(message.created_at)}</time></header><p>${escape(message.text)}</p></div></article>`).join('') || '<div class="empty-conversation"><i>‚ú¶</i><strong>Conversa ainda vazia</strong><small>Envie a primeira resposta para iniciar o atendimento.</small></div>'}</div>
+          <form data-form="reply" data-ticket="${selected.id}" class="composer"><textarea name="text" required placeholder="Escreva uma resposta para ${escape(selected.client_name)}..."></textarea><footer><label>Atualizar como <select name="status"><option value="in_progress">Em atendimento</option><option value="resolved">Resolvido</option><option value="open">Aberto</option></select></label><button class="primary" type="submit">Enviar resposta ‚Üí</button></footer></form>` : '<div class="empty-conversation full"><i>‚ú¶</i><strong>Selecione um chamado</strong><small>A conversa completa aparecer√° aqui.</small></div>'}</section>
+      </div>
+    </section>`;
+  }
+
+  function plans() {
+    const planCards = state.plans.map((plan) => {
+      const subscribers = state.tenants.filter((tenant) => tenant.subscriptions?.some((subscription) => String(subscription.plan_id) === String(plan.id) && subscription.status === 'active')).length;
+      const permissions = (plan.plan_permissions || []).map((permission) => permission.permission_key);
+      return `<article class="plan-card"><header><span><small>PLANO</small><h2>${escape(plan.name)}</h2></span><button class="more-button" aria-label="Op√ß√µes">‚Ä¢‚Ä¢‚Ä¢</button></header><div class="plan-price"><strong>${money(plan.price)}</strong><span>/ m√™s</span></div><div class="plan-stats"><span><strong>${subscribers}</strong><small>assinantes ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) inclu√≠da(s)</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>‚úì ${escape(key)}</span>`).join('') || '<span class="muted">Nenhuma permiss√£o vinculada</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} permiss√µes</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de trial</span><button class="danger-link" data-action="delete-plan" data-id="${plan.id}">Excluir plano</button></footer></article>`;
+    }).join('');
+    return `<section class="page">${pageHeader('ESTRAT√âGIA COMERCIAL', 'Planos e permiss√µes', 'Defina o cat√°logo comercial e o que cada assinatura pode acessar.', `<button class="primary" data-action="open-plan">Ôºã Criar plano</button>`)}<div class="plan-grid">${planCards || '<div class="panel empty">Nenhum plano cadastrado.</div>'}</div></section>`;
+  }
+
+  function catalog() {
+    const selected = state.tenants.find((tenant) => String(tenant.id) === String(state.selectedTenant));
+    const options = state.tenants.map((tenant) => `<option value="${tenant.id}" ${String(tenant.id) === String(state.selectedTenant) ? 'selected' : ''}>${escape(tenant.full_name)} ‚Äî ${escape(tenant.stores?.[0]?.name || tenant.email)}</option>`).join('');
+    const available = state.menu.filter((item) => item.is_available).length;
+    return `<section class="page">${pageHeader('OPERA√á√ÉO DO PRODUTO', 'Inspetor de card√°pios', 'Consulte e controle a disponibilidade dos itens de cada cliente.', `<select class="tenant-select" data-action="select-tenant" aria-label="Selecionar cliente">${options}</select>`)}
+      <div class="summary-strip"><div><span>Cliente selecionado</span><strong>${escape(selected?.full_name || '‚Äî')}</strong></div><div><span>Itens no card√°pio</span><strong>${state.menu.length}</strong></div><div><span>Dispon√≠veis</span><strong>${available}</strong></div><div><span>Pausados</span><strong>${state.menu.length - available}</strong></div></div>
+      <div class="panel table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Pre√ßo</th><th>Disponibilidade</th><th></th></tr></thead><tbody>${state.menu.map((item) => `<tr><td><strong>${escape(item.name)}</strong><small>ID ${escape(String(item.id).slice(0, 8))}</small></td><td>${escape(item.categories?.name || 'Geral')}</td><td><strong>${money(item.price)}</strong></td><td><span class="availability ${item.is_available ? 'on' : 'off'}"><i></i>${item.is_available ? 'Dispon√≠vel' : 'Pausado'}</span></td><td><button class="row-action" data-action="toggle-menu" data-id="${item.id}" data-available="${item.is_available}">${item.is_available ? 'Pausar item' : 'Disponibilizar'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Este cliente ainda n√£o possui itens no card√°pio.</td></tr>'}</tbody></table></div>
+    </section>`;
+  }
+
+  function provision() {
+    return `<section class="page onboarding-page">${pageHeader('NOVO CLIENTE', 'Onboarding ChefOS', 'Crie a estrutura inicial completa para uma nova opera√ß√£o.', '')}
+      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Identifica√ß√£o</strong><small>Usu√°rio e opera√ß√£o</small></span><span><i>2</i><strong>Plano e acesso</strong><small>Trial e permiss√µes</small></span><span><i>3</i><strong>Estrutura inicial</strong><small>Sal√£o e mesas</small></span><div class="onboarding-note"><strong>Provisionamento completo</strong><p>Ao concluir, o ChefOS cria loja, perfil, assinatura de trial, sal√£o, mesas e a chave de integra√ß√£o.</p></div></aside>
+        <form class="panel onboarding-form" data-form="provision"><div class="form-section"><span class="section-number">01</span><div><h2>Cliente e opera√ß√£o</h2><p class="muted">Use o UUID j√° criado no Supabase Auth.</p></div></div><div class="form-grid"><label>ID do usu√°rio<input name="userId" required placeholder="UUID do usu√°rio no Supabase Auth" /></label><label>Nome da opera√ß√£o<input name="storeName" required placeholder="Ex.: Bistr√¥ Central" /></label><label>CNPJ<input name="cnpj" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" placeholder="(00) 00000-0000" /></label><label class="wide">Endere√ßo<input name="address" placeholder="Rua, n√∫mero, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Plano inicial</h2><p class="muted">A assinatura ser√° iniciada com 30 dias de trial.</p></div></div><label>Plano ChefOS<select name="planId"><option value="">Selecionar automaticamente o plano de entrada</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} ‚Äî ${money(plan.price)}/m√™s</option>`).join('')}</select></label><footer><span><i>‚úì</i> A estrutura padr√£o ser√° criada automaticamente</span><button class="primary" type="submit">Criar cliente e iniciar trial ‚Üí</button></footer></form>
+      </div></section>`;
+  }
+
+  function health() {
+    const data = state.health || {};
+    const healthy = data.status === 'healthy';
+    return `<section class="page">${pageHeader('OBSERVABILIDADE', 'Sa√∫de do sistema', 'Conectividade, ambiente e desempenho dos servi√ßos administrativos.', `<button class="secondary" data-action="reload-health">‚Üª Executar verifica√ß√£o</button>`)}
+      <div class="health-hero ${healthy ? 'healthy' : 'degraded'}"><div><i>${healthy ? '‚úì' : '!'}</i><span><small>STATUS GERAL</small><strong>${healthy ? 'Tudo operacional' : 'Aten√ß√£o necess√°ria'}</strong><p>${healthy ? 'Os servi√ßos principais responderam normalmente.' : 'Uma ou mais verifica√ß√µes precisam de aten√ß√£o.'}</p></span></div><span><small>LAT√äNCIA TOTAL</small><strong>${data.latencyMs ?? '‚Äî'} ms</strong></span></div>
+      <div class="check-grid">${Object.entries(data.checks || {}).map(([name, check]) => `<article class="panel check-card"><header><span class="check-icon ${check.status}">${check.status === 'ok' ? '‚úì' : '!'}</span>${status(check.status === 'ok' ? 'active' : 'past_due')}</header><h2>${escape(name)}</h2><p>${escape(check.message || '')}</p><footer><span>Lat√™ncia</span><strong>${check.latencyMs ?? '‚Äî'} ms</strong></footer></article>`).join('') || '<div class="panel empty">Execute a verifica√ß√£o para carregar os servi√ßos.</div>'}</div>
+      ${data.system ? `<div class="panel system-info"><div><span>Node.js</span><strong>${escape(data.system.nodeVersion)}</strong></div><div><span>Uptime</span><strong>${data.system.uptimeSeconds}s</strong></div><div><span>Mem√≥ria</span><strong>${data.system.memoryUsageMB} MB</strong></div><div><span>√öltima verifica√ß√£o</span><strong>${date(data.timestamp)}</strong></div></div>` : ''}
+    </section>`;
+  }
+
+  function logs() {
+    return `<section class="page">${pageHeader('GOVERNAN√áA', 'Auditoria do sistema', '√öltimos eventos registrados pelas opera√ß√µes administrativas.', `<button class="secondary" data-action="reload-logs">‚Üª Atualizar eventos</button>`)}
+      <div class="panel timeline">${(state.logs || []).map((log) => `<article><span class="timeline-dot"></span><div><header><strong>${escape(log.action || log.event_type || 'Evento')}</strong><time>${date(log.created_at)}</time></header><p>${escape(typeof log.details === 'object' ? JSON.stringify(log.details) : log.description || log.details || 'Sem descri√ß√£o adicional')}</p></div></article>`).join('') || '<p class="empty">Nenhum evento de auditoria encontrado.</p>'}</div>
+    </section>`;
+  }
+
+  function administrators() {
+    return `<section class="page">${pageHeader('SEGURAN√áA E ACESSO', 'Administradores', 'Controle quem pode operar o Control Center do ChefOS.', '')}
+      <div class="access-layout"><div class="panel"><div class="panel-heading"><div><p class="eyebrow">EQUIPE</p><h2>Acessos ativos</h2></div><span class="count-badge">${state.admins?.length || 0}</span></div><div class="admin-list">${(state.admins || []).map((admin) => `<div><span class="avatar">${initials(admin.email)}</span><span><strong>${escape(admin.email)}</strong><small>${admin.protected ? 'Administrador raiz' : 'Administrador'} ¬∑ desde ${day(admin.created_at)}</small></span>${admin.protected ? '<span class="root-badge">Protegido</span>' : `<button class="danger-link" data-action="delete-admin" data-email="${escape(admin.email)}">Remover</button>`}</div>`).join('') || '<p class="empty">Nenhum administrador encontrado.</p>'}</div></div>
+        <form class="panel invite-card" data-form="admin"><span class="invite-icon">Ôºã</span><p class="eyebrow">NOVO ACESSO</p><h2>Adicionar administrador</h2><p class="muted">O usu√°rio precisa existir no Supabase Auth para conseguir entrar.</p><label>E-mail corporativo<input name="email" type="email" required placeholder="nome@chefos.online" /></label><button class="primary" type="submit">Autorizar acesso</button></form></div>
+    </section>`;
+  }
+
+  function activePage() {
+    const pages = { overview, subscriptions, tenants, support, plans, catalog, provision, health, logs, administrators };
+    return pages[state.section]();
+  }
+
+  function subscriptionModal(tenant) {
+    const subscription = tenant.subscriptions?.[0] || {};
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GEST√ÉO DE ACESSO</p><h2 id="modal-title">Assinatura de ${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">√ó</button></header><div class="modal-body"><input type="hidden" name="userId" value="${tenant.id}"/><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} ‚Äî ${money(plan.price)}/m√™s</option>`).join('')}</select></label><label>Pr√≥xima renova√ß√£o<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" /></label><div class="modal-summary"><span><small>OPERA√á√ïES</small><strong>${tenant.stores?.length || 0}</strong></span><span><small>VALOR ATUAL</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar altera√ß√µes</button></footer></form></div>`;
+  }
+
+  function tenantModal(tenant) {
+    const subscription = tenant.subscriptions?.[0] || {};
+    const plan = planById(subscription.plan_id);
+    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">√ó</button></header><div class="drawer-title"><p class="eyebrow">CLIENTE CHEFOS</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p>${status(subscription.status)}</div><div class="detail-grid"><span><small>PLANO</small><strong>${escape(plan?.name || 'Sem plano')}</strong></span><span><small>VALOR MENSAL</small><strong>${money(plan?.price)}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>√öLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span></div><section><div class="panel-heading"><h3>Opera√ß√µes</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>‚ó´</span><span><strong>${escape(store.name)}</strong><small>Criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma opera√ß√£o vinculada.</p>'}</div></section><footer><button class="secondary" data-action="edit-subscription" data-id="${tenant.id}">Gerenciar assinatura</button><button class="primary" data-action="tenant-catalog" data-id="${tenant.id}">Ver card√°pio</button></footer></aside></div>`;
+  }
+
+  function planModal() {
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal" data-form="plan"><header><div><p class="eyebrow">CAT√ÅLOGO COMERCIAL</p><h2 id="modal-title">Criar novo plano</h2><p>Configure pre√ßo, limites e acesso do plano.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">√ó</button></header><div class="modal-body form-grid"><label>Nome do plano<input name="name" required placeholder="Profissional" /></label><label>Identificador<input name="slug" required placeholder="profissional" /></label><label>Pre√ßo mensal<input name="price" type="number" step="0.01" min="0" required placeholder="199,00" /></label><label>Trial (dias)<input name="trial" type="number" min="0" value="30" /></label><label>M√°ximo de lojas<input name="stores" type="number" min="1" value="1" /></label><label class="wide">Permiss√µes separadas por v√≠rgula<input name="permissions" placeholder="/dashboard, /pos, /reports" /></label></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Criar plano</button></footer></form></div>`;
+  }
+
+  function modalView() {
+    if (!state.modal) return '';
+    if (state.modal.type === 'subscription') return subscriptionModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
+    if (state.modal.type === 'tenant') return tenantModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
+    if (state.modal.type === 'plan') return planModal();
+    return '';
+  }
+
+  function shell() {
+    return `<div class="app-shell">${sidebar()}<div class="workspace">${topbar()}<main class="content">${state.notice ? `<div class="notice ${state.notice.type}" role="status"><span>${state.notice.type === 'error' ? '!' : '‚úì'}</span>${escape(state.notice.text)}<button data-action="dismiss-notice" aria-label="Fechar">√ó</button></div>` : ''}${state.loading ? '<div class="loading"><i></i>Atualizando opera√ß√£o...</div>' : ''}${activePage()}</main></div>${state.sidebarOpen ? '<button class="sidebar-backdrop" data-action="toggle-sidebar" aria-label="Fechar menu"></button>' : ''}${modalView()}</div>`;
+  }
+
+  function render(focusKey = '') {
+    if (!configured()) { app.innerHTML = missingConfigView(); return; }
+    app.innerHTML = state.user ? shell() : loginView();
+    if (focusKey) {
+      const input = document.querySelector(`[data-search="${focusKey}"]`);
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }
+    document.body.classList.toggle('modal-open', Boolean(state.modal));
+  }
+
+  async function safe(action) {
+    try { await action(); } catch (error) { state.loading = false; showNotice(error.message || 'Ocorreu um erro.', 'error'); }
+  }
+
+  function openSection(section) {
+    state.section = section;
+    state.sidebarOpen = false;
+    state.globalQuery = '';
+    state.loading = true;
+    render();
+    return loadSection(section).finally(() => { state.loading = false; render(); });
+  }
+
+  function downloadCsv(kind) {
+    const sourceTenants = kind === 'subscriptions'
+      ? state.tenants.filter((tenant) => {
+        const subscription = tenant.subscriptions?.[0] || {};
+        const query = state.filters.subscription;
+        return (!query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query))
+          && (state.filters.subscriptionStatus === 'all' || subscription.status === state.filters.subscriptionStatus);
+      })
+      : state.tenants.filter((tenant) => !state.filters.customer || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, state.filters.customer));
+    const rows = kind === 'subscriptions'
+      ? [['Cliente', 'Email', 'Loja', 'Plano', 'Status', 'Valor mensal', 'Renova√ß√£o'], ...sourceTenants.map((tenant) => { const subscription = tenant.subscriptions?.[0] || {}; const plan = planById(subscription.plan_id); return [tenant.full_name, tenant.email, tenant.stores?.[0]?.name || '', plan?.name || '', subscription.status || '', plan?.price || 0, subscription.current_period_end || '']; })]
+      : [['Cliente', 'Email', 'Lojas', 'Status', 'Criado em', '√öltimo acesso'], ...sourceTenants.map((tenant) => [tenant.full_name, tenant.email, tenant.stores?.map((store) => store.name).join(' | ') || '', tenant.subscriptions?.[0]?.status || '', tenant.created_at || '', tenant.last_sign_in_at || ''])];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(';')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `chefos-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotice('Arquivo CSV preparado com sucesso.');
+  }
+
+  document.addEventListener('submit', (event) => safe(async () => {
+    const form = event.target.closest('form');
+    if (!form) return;
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(form));
+    if (form.dataset.form === 'login') {
+      state.loading = true; render();
+      await signIn(values.email, values.password);
+      await loadCore();
+      return;
+    }
+    if (form.dataset.form === 'subscription') {
+      const currentPeriodEnd = values.currentPeriodEnd ? new Date(`${values.currentPeriodEnd}T23:59:59`).toISOString() : undefined;
+      await api('/api/admin/subscriptions', { method: 'POST', body: { userId: values.userId, status: values.status, planId: values.planId, currentPeriodEnd } });
+      state.modal = null;
+      await loadCore();
+      showNotice('Assinatura atualizada com sucesso.');
+      return;
+    }
+    if (form.dataset.form === 'plan') {
+      await api('/api/admin/plans', { method: 'POST', body: { plan: { name: values.name, slug: values.slug, price: Number(values.price), trial_period_days: Number(values.trial), max_stores: Number(values.stores) }, permissions: String(values.permissions || '').split(',').map((item) => item.trim()).filter(Boolean) } });
+      state.plans = (await api('/api/admin/plans')).data || [];
+      state.modal = null;
+      showNotice('Plano criado com sucesso.');
+      return;
+    }
+    if (form.dataset.form === 'reply') {
+      await api('/api/admin/messages', { method: 'POST', body: { ticket_id: form.dataset.ticket, text: values.text, status_update: values.status } });
+      state.tickets = (await api('/api/admin/tickets')).data || [];
+      showNotice('Resposta enviada ao cliente.');
+      return;
+    }
+    if (form.dataset.form === 'provision') {
+      state.loading = true; render();
+      const result = await api('/api/admin/provision-tenant', { method: 'POST', body: values });
+      await loadCore();
+      showNotice(`Cliente criado. Chave de integra√ß√£o: ${result.tenant.apiKey}`);
+      return;
+    }
+    if (form.dataset.form === 'admin') {
+      await api('/api/admin/administrators', { method: 'POST', body: values });
+      state.admins = (await api('/api/admin/administrators')).data || [];
+      showNotice('Administrador autorizado.');
+    }
+  }));
+
+  document.addEventListener('click', (event) => safe(async () => {
+    const target = event.target.closest('[data-action]');
+    if (!target) return;
+    const action = target.dataset.action;
+    if (action === 'logout') return signOut();
+    if (action === 'section' || action === 'command-section') return openSection(target.dataset.section);
+    if (action === 'filtered-section') { state.filters.subscriptionStatus = target.dataset.filter; return openSection(target.dataset.section); }
+    if (action === 'toggle-sidebar') { state.sidebarOpen = !state.sidebarOpen; render(); return; }
+    if (action === 'refresh') return loadCore();
+    if (action === 'dismiss-notice') { state.notice = null; render(); return; }
+    if (action === 'close-modal') { state.modal = null; render(); return; }
+    if (action === 'open-plan') { state.modal = { type: 'plan' }; render(); return; }
+    if (action === 'open-provision') return openSection('provision');
+    if (action === 'open-tenant') { state.globalQuery = ''; state.modal = { type: 'tenant', id: target.dataset.id }; render(); return; }
+    if (action === 'edit-subscription') { state.modal = { type: 'subscription', id: target.dataset.id }; render(); return; }
+    if (action === 'tenant-catalog') { state.modal = null; state.selectedTenant = target.dataset.id; return openSection('catalog'); }
+    if (action === 'export') { downloadCsv(target.dataset.kind); return; }
+    if (action === 'ticket-filter') { state.filters.ticketStatus = target.dataset.value; render(); return; }
+    if (action === 'select-ticket') { state.selectedTicketId = target.dataset.id; render(); return; }
+    if (action === 'open-ticket') { state.selectedTicketId = target.dataset.id; return openSection('support'); }
+    if (action === 'reload-tickets') { state.loading = true; render(); await loadSection('support', true); state.loading = false; render(); return; }
+    if (action === 'resolve-ticket') {
+      await api('/api/admin/tickets', { method: 'PUT', body: { id: target.dataset.id, updates: { status: 'resolved' } } });
+      state.tickets = (await api('/api/admin/tickets')).data || [];
+      showNotice('Chamado marcado como resolvido.');
+      return;
+    }
+    if (action === 'reload-health') { state.health = null; state.loading = true; render(); await loadSection('health', true); state.loading = false; render(); return; }
+    if (action === 'reload-logs') { state.logs = null; state.loading = true; render(); await loadSection('logs', true); state.loading = false; render(); return; }
+    if (action === 'toggle-menu') {
+      await api('/api/admin/tenant-menu', { method: 'PUT', body: { id: target.dataset.id, updates: { is_available: target.dataset.available !== 'true' } } });
+      await loadSection('catalog'); render(); showNotice('Disponibilidade atualizada.'); return;
+    }
+    if (action === 'delete-plan') {
+      if (!confirm('Excluir este plano? Assinaturas vinculadas podem impedir a exclus√£o.')) return;
+      await api('/api/admin/plans', { method: 'DELETE', body: { id: target.dataset.id } });
+      state.plans = (await api('/api/admin/plans')).data || []; showNotice('Plano exclu√≠do.'); return;
+    }
+    if (action === 'delete-admin') {
+      if (!confirm(`Remover ${target.dataset.email} do Control Center?`)) return;
+      await api('/api/admin/administrators', { method: 'DELETE', body: { email: target.dataset.email } });
+      state.admins = (await api('/api/admin/administrators')).data || []; showNotice('Acesso removido.');
+    }
+  }));
+
+  document.addEventListener('input', (event) => {
+    const input = event.target.closest('[data-search]');
+    if (!input) return;
+    const key = input.dataset.search;
+    if (key === 'global') state.globalQuery = input.value;
+    else state.filters[key] = input.value;
+    render(key);
+  });
+
+  document.addEventListener('change', (event) => safe(async () => {
+    const filter = event.target.closest('[data-filter]');
+    if (filter) { state.filters[filter.dataset.filter] = filter.value; render(); return; }
+    const select = event.target.closest('[data-action="select-tenant"]');
+    if (!select) return;
+    state.selectedTenant = select.value;
+    state.loading = true; render();
+    await loadSection('catalog');
+    state.loading = false; render();
+  }));
+
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      document.querySelector('[data-search="global"]')?.focus();
+    }
+    if (event.key === 'Escape') {
+      state.modal = null;
+      state.sidebarOpen = false;
+      state.globalQuery = '';
+      render();
+    }
+  });
+
+  async function boot() {
+    render();
+    if (!configured() || !state.token) return;
+    try {
+      state.user = (await api('/api/admin/session')).data;
+      await loadCore();
+    } catch {
+      await signOut();
+      showNotice('Sua sess√£o expirou. Entre novamente.', 'error');
+    }
+  }
+
+  boot();
+})();
