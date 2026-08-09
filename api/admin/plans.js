@@ -1,4 +1,5 @@
 import { assert, assertUuid, auditAdminAction, bodyOf, cleanText, fail, requireAdmin, reply, supabase } from '../_lib/admin.js';
+import { PLAN_PERMISSION_GROUPS } from '../_lib/plan-permissions.js';
 
 async function replacePermissions(planId, keys) {
   await supabase(`/rest/v1/plan_permissions?plan_id=eq.${encodeURIComponent(planId)}`, { method: 'DELETE' });
@@ -49,7 +50,7 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const result = await supabase('/rest/v1/plans?select=*,plan_permissions(*)&order=price.asc');
-      return reply(res, 200, { data: result.data || [] });
+      return reply(res, 200, { data: result.data || [], permissionCatalog: PLAN_PERMISSION_GROUPS });
     }
     const payload = await bodyOf(req);
     const { id, plan } = payload;

@@ -13,6 +13,7 @@
     customerSummary: null,
     customerMeta: null,
     plans: [],
+    permissionCatalog: [],
     tickets: null,
     ticketSummary: null,
     ticketMeta: null,
@@ -56,6 +57,9 @@
   const apiUrl = (path) => `${String(config.apiBaseUrl || '').replace(/\/$/, '')}${path}`;
   const configured = () => Boolean(config.supabaseUrl && config.supabaseAnonKey);
   const planById = (id) => state.plans.find((plan) => String(plan.id) === String(id));
+  const permissionDefinitions = () => state.permissionCatalog.flatMap((group) => group.permissions || []);
+  const permissionDefinition = (key) => permissionDefinitions().find((permission) => permission.key === key);
+  const permissionLabel = (key) => permissionDefinition(key)?.name || 'Acesso adicional';
   const subscriptionOf = (tenant) => tenant?.subscription || tenant?.subscriptions?.[0] || null;
   const initials = (value = '') => value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'C';
   const normalize = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -74,6 +78,38 @@
     return password.join('');
   }
 
+  function updatePermissionSummary(form) {
+    if (!form) return;
+    const checkboxes = [...form.querySelectorAll('input[type="checkbox"][name="permissions"]')];
+    const legacyCount = form.querySelectorAll('input[type="hidden"][name="permissions"]').length;
+    const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length + legacyCount;
+    const count = form.querySelector('[data-permission-count]');
+    if (count) count.textContent = `${selectedCount} módulo(s) selecionado(s)`;
+    form.querySelectorAll('[data-permission-group]').forEach((group) => {
+      const groupCheckboxes = [...group.querySelectorAll('input[name="permissions"]')];
+      const button = group.querySelector('[data-action="toggle-permission-group"]');
+      const groupCount = group.querySelector('[data-permission-group-count]');
+      if (groupCount) groupCount.textContent = `${groupCheckboxes.filter((checkbox) => checkbox.checked).length}/${groupCheckboxes.length}`;
+      if (button) button.textContent = groupCheckboxes.length && groupCheckboxes.every((checkbox) => checkbox.checked) ? 'Desmarcar grupo' : 'Selecionar grupo';
+    });
+  }
+
+  function filterPermissionOptions(input) {
+    const form = input.closest('form');
+    const query = normalize(input.value);
+    let visible = 0;
+    form?.querySelectorAll('.permission-option').forEach((option) => {
+      const matches = !query || normalize(option.dataset.permissionText).includes(query);
+      option.hidden = !matches;
+      if (matches) visible += 1;
+    });
+    form?.querySelectorAll('[data-permission-group]').forEach((group) => {
+      group.hidden = !group.querySelector('.permission-option:not([hidden])');
+    });
+    const empty = form?.querySelector('[data-permission-empty]');
+    if (empty) empty.hidden = visible > 0;
+  }
+
   function relative(value) {
     if (!value) return 'sem registro';
     const diff = new Date(value).getTime() - Date.now();
@@ -86,7 +122,7 @@
 
   function status(value) {
     const labels = {
-      active: 'Ativa', trialing: 'Em trial', past_due: 'Inadimplente', canceled: 'Cancelada', unpaid: 'Não paga',
+      active: 'Ativa', trialing: 'Em teste', past_due: 'Inadimplente', canceled: 'Cancelada', unpaid: 'Não paga',
       open: 'Aberto', in_progress: 'Em atendimento', resolved: 'Resolvido', closed: 'Fechado', unknown: 'Sem status'
     };
     const safe = value || 'unknown';
@@ -164,7 +200,7 @@
       });
     } finally {
       sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, health: null, logs: null });
+      Object.assign(state, { token: '', user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, health: null, logs: null });
       render();
     }
   }
@@ -181,6 +217,7 @@
       state.customerSummary = customers.summary || null;
       state.customerMeta = customers.meta || null;
       state.plans = plans.data || [];
+      state.permissionCatalog = plans.permissionCatalog || [];
       state.tickets = tickets.data || [];
       state.ticketSummary = tickets.summary || null;
       state.ticketMeta = tickets.meta || null;
@@ -311,7 +348,7 @@
         ${metric('Fila de suporte', shortNumber((data.openTickets || 0) + (data.inProgressTickets || 0)), `${data.waitingOver24Hours || 0} aguardando há mais de 24h`, data.waitingOver24Hours ? 'warning' : '', '✦')}
       </div>
       <div class="operations-radar">
-        <button data-action="filtered-section" data-section="subscriptions" data-filter="trialing"><span>TRIALS ENCERRANDO</span><strong>${data.trialsEnding7Days || 0}</strong><small>nos próximos 7 dias</small></button>
+        <button data-action="filtered-section" data-section="subscriptions" data-filter="trialing"><span>TESTES ENCERRANDO</span><strong>${data.trialsEnding7Days || 0}</strong><small>nos próximos 7 dias</small></button>
         <button data-action="section" data-section="subscriptions"><span>ACESSOS VENCIDOS</span><strong>${data.expiredButEnabled || 0}</strong><small>com status ainda ativo</small></button>
         <button data-action="section" data-section="support"><span>SLA &gt; 24 HORAS</span><strong>${data.waitingOver24Hours || 0}</strong><small>chamados pendentes</small></button>
         <button data-action="section" data-section="tenants"><span>ONBOARDING INCOMPLETO</span><strong>${data.incompleteOnboarding || 0}</strong><small>clientes para revisar</small></button>
@@ -351,7 +388,7 @@
       ${pageHeader('RECEITA E ACESSO', 'Assinaturas', 'Controle planos, vencimentos e o acesso de cada operação ChefOS.', actions)}
       <div class="integration-warning"><span>!</span><div><strong>Alterações de acesso são internas</strong><p>O conector de recorrência do Mercado Pago ainda não está habilitado; mudanças aqui não cancelam nem alteram cobranças no provedor.</p></div></div>
       <div class="summary-strip"><div><span>Receita contratada nesta visão</span><strong>${money(contractedMonthly)}</strong></div><div><span>Assinaturas exibidas</span><strong>${rows.length}</strong></div><div><span>Vencem em 7 dias</span><strong>${dueSoon}</strong></div><div class="danger-text"><span>Ativas com período vencido</span><strong>${expired}</strong></div></div>
-      <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="unpaid" ${filter === 'unpaid' ? 'selected' : ''}>Não pagas</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
+      <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="unpaid" ${filter === 'unpaid' ? 'selected' : ''}>Não pagas</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
       <div class="panel table-wrap"><table><thead><tr><th>Cliente / operação</th><th>Plano</th><th>Status</th><th>Saúde do acesso</th><th>Valor mensal</th><th>Período atual</th><th></th></tr></thead><tbody>
         ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td>${entitlement(subscription)}</td><td><strong>${money(plan?.price)}</strong><small>valor do plano</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td><button class="row-action" data-action="edit-subscription" data-id="${accountId}">Gerenciar</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
       </tbody></table></div>
@@ -417,9 +454,9 @@
       const linkedSubscriptions = state.tenants.filter((tenant) => String(subscriptionOf(tenant)?.plan_id) === String(plan.id)).length;
       const permissions = (plan.plan_permissions || []).map((permission) => permission.permission_key);
       const billingState = !plan.recurring ? '<span class="billing-state neutral">Pagamento único</span>' : plan.preapproval_plan_id ? '<span class="billing-state ready">Mercado Pago conectado</span>' : '<span class="billing-state warning">Recorrência pendente</span>';
-      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${plan.recurring ? 'ASSINATURA' : 'ACESSO ÚNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descrição comercial.')}</p></span><button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button></header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${plan.recurring ? '/ mês' : ' pagamento único'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span><span><strong>${permissions.length}</strong><small>permissões</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(key)}</span>`).join('') || '<span class="muted">Nenhuma permissão vinculada</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} permissões</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de trial</span><div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div></footer></article>`;
+      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${plan.recurring ? 'ASSINATURA' : 'ACESSO ÚNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descrição comercial.')}</p></span><button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button></header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${plan.recurring ? '/ mês' : ' pagamento único'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span><span><strong>${permissions.length}</strong><small>módulos</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(permissionLabel(key))}</span>`).join('') || '<span class="muted">Nenhum módulo incluído</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} módulos incluídos</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de teste</span><div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div></footer></article>`;
     }).join('');
-    return `<section class="page">${pageHeader('ESTRATÉGIA COMERCIAL', 'Planos e permissões', 'Modele preço, recorrência, limites e acesso sem editar o banco manualmente.', `<button class="primary" data-action="open-plan">＋ Criar plano</button>`)}
+    return `<section class="page">${pageHeader('ESTRATÉGIA COMERCIAL', 'Planos e módulos', 'Modele preço, recorrência, limites e acesso sem editar o banco manualmente.', `<button class="primary" data-action="open-plan">＋ Criar plano</button>`)}
       ${integrationGaps ? `<div class="integration-warning"><span>!</span><div><strong>${integrationGaps} plano(s) recorrente(s) sem vínculo de cobrança</strong><p>Adicione o ID do plano de recorrência do Mercado Pago antes de comercializar esses planos.</p></div></div>` : ''}
       <div class="summary-strip"><div><span>Planos no catálogo</span><strong>${state.plans.length}</strong></div><div><span>Acessos ativos</span><strong>${activeSubscriptions.length}</strong></div><div><span>Receita contratada</span><strong>${money(contractedMonthly)}</strong></div><div class="${integrationGaps ? 'warning-text' : ''}"><span>Integrações pendentes</span><strong>${integrationGaps}</strong></div></div>
       <div class="plan-grid">${planCards || '<div class="panel empty">Nenhum plano cadastrado.</div>'}</div></section>`;
@@ -449,8 +486,8 @@
 
   function provision() {
     return `<section class="page onboarding-page">${pageHeader('NOVO CLIENTE', 'Onboarding ChefOS', 'Crie a conta, a operação e o acesso inicial em um único fluxo.', '')}
-      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Criar acesso</strong><small>Nome, e-mail e senha</small></span><span><i>2</i><strong>Configurar operação</strong><small>Empresa e loja principal</small></span><span><i>3</i><strong>Ativar plano</strong><small>Trial, permissões e estrutura</small></span><div class="onboarding-note"><strong>Sem UUID manual</strong><p>A API cria a conta no Supabase Auth e usa o identificador internamente. Se o e-mail já existir, a conta é reutilizada sem trocar sua senha.</p></div></aside>
-        <form class="panel onboarding-form" data-form="provision"><div class="onboarding-intro"><span>✦</span><div><strong>Ativação completa em uma ação</strong><p>Ao finalizar, o cliente poderá entrar no ChefOS com o e-mail e a senha inicial definidos abaixo.</p></div></div><div class="form-section"><span class="section-number">01</span><div><h2>Acesso do proprietário</h2><p class="muted">Estes dados criam a conta real do cliente.</p></div></div><div class="form-grid"><label>Nome completo<input name="fullName" required maxlength="160" autocomplete="off" placeholder="Ex.: Mariana Costa" /></label><label>E-mail de acesso<input name="email" type="email" required maxlength="254" autocomplete="off" placeholder="mariana@restaurante.com" /></label><label class="wide password-field">Senha inicial<span><input name="initialPassword" type="text" required minlength="10" maxlength="128" autocomplete="off" placeholder="Mínimo de 10 caracteres" /><button type="button" class="secondary" data-action="generate-password">Gerar senha segura</button></span><small>Guarde esta senha para entregar ao cliente. Ela não será salva no painel.</small></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Empresa e operação</h2><p class="muted">Dados usados na loja principal e no perfil empresarial.</p></div></div><div class="form-grid"><label>Nome da operação<input name="storeName" required maxlength="180" placeholder="Ex.: Bistrô Central" /></label><label>CNPJ<input name="cnpj" required maxlength="30" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" maxlength="40" placeholder="(00) 00000-0000" /></label><label>Endereço<input name="address" maxlength="300" placeholder="Rua, número, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">03</span><div><h2>Plano e ativação</h2><p class="muted">O trial e os limites seguem o plano selecionado.</p></div></div><label>Plano ChefOS<select name="planId" required><option value="">Selecione o plano</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} — ${money(plan.price)}${plan.recurring ? '/mês' : ''} · ${plan.trial_period_days || 0} dias de trial</option>`).join('')}</select></label><label class="confirmation-check"><input type="checkbox" name="confirm" required /><span><strong>Confirmo a criação desta conta e estrutura</strong><small>Será criado o usuário, perfil, loja, assinatura, permissões, salão e seis mesas.</small></span></label><footer><span><i>✓</i> Todo o fluxo usa APIs administrativas auditadas</span><button class="primary" type="submit">Criar cliente e ativar ChefOS →</button></footer></form>
+      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Criar acesso</strong><small>Nome, e-mail e senha</small></span><span><i>2</i><strong>Configurar operação</strong><small>Empresa e loja principal</small></span><span><i>3</i><strong>Ativar plano</strong><small>Teste, módulos e estrutura</small></span><div class="onboarding-note"><strong>Sem UUID manual</strong><p>A API cria a conta no Supabase Auth e usa o identificador internamente. Se o e-mail já existir, a conta é reutilizada sem trocar sua senha.</p></div></aside>
+        <form class="panel onboarding-form" data-form="provision"><div class="onboarding-intro"><span>✦</span><div><strong>Ativação completa em uma ação</strong><p>Ao finalizar, o cliente poderá entrar no ChefOS com o e-mail e a senha inicial definidos abaixo.</p></div></div><div class="form-section"><span class="section-number">01</span><div><h2>Acesso do proprietário</h2><p class="muted">Estes dados criam a conta real do cliente.</p></div></div><div class="form-grid"><label>Nome completo<input name="fullName" required maxlength="160" autocomplete="off" placeholder="Ex.: Mariana Costa" /></label><label>E-mail de acesso<input name="email" type="email" required maxlength="254" autocomplete="off" placeholder="mariana@restaurante.com" /></label><label class="wide password-field">Senha inicial<span><input name="initialPassword" type="text" required minlength="10" maxlength="128" autocomplete="off" placeholder="Mínimo de 10 caracteres" /><button type="button" class="secondary" data-action="generate-password">Gerar senha segura</button></span><small>Guarde esta senha para entregar ao cliente. Ela não será salva no painel.</small></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Empresa e operação</h2><p class="muted">Dados usados na loja principal e no perfil empresarial.</p></div></div><div class="form-grid"><label>Nome da operação<input name="storeName" required maxlength="180" placeholder="Ex.: Bistrô Central" /></label><label>CNPJ<input name="cnpj" required maxlength="30" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" maxlength="40" placeholder="(00) 00000-0000" /></label><label>Endereço<input name="address" maxlength="300" placeholder="Rua, número, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">03</span><div><h2>Plano e ativação</h2><p class="muted">O período de teste e os limites seguem o plano selecionado.</p></div></div><label>Plano ChefOS<select name="planId" required><option value="">Selecione o plano</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} — ${money(plan.price)}${plan.recurring ? '/mês' : ''} · ${plan.trial_period_days || 0} dias de teste</option>`).join('')}</select></label><label class="confirmation-check"><input type="checkbox" name="confirm" required /><span><strong>Confirmo a criação desta conta e estrutura</strong><small>Será criado o usuário, perfil, loja, assinatura, módulos, salão e seis mesas.</small></span></label><footer><span><i>✓</i> Todo o fluxo usa APIs administrativas auditadas</span><button class="primary" type="submit">Criar cliente e ativar ChefOS →</button></footer></form>
       </div></section>`;
   }
 
@@ -485,7 +522,7 @@
   function subscriptionModal(tenant) {
     const subscription = subscriptionOf(tenant) || {};
     const accountId = tenant.accountId || tenant.id;
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GESTÃO DE ACESSO</p><h2 id="modal-title">Assinatura de ${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="accountId" value="${accountId}"/><div class="modal-alert"><strong>Atenção à cobrança</strong><p>Esta ação altera o acesso interno. A recorrência do Mercado Pago ainda precisa ser gerenciada separadamente.</p></div><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="unpaid" ${subscription.status === 'unpaid' ? 'selected' : ''}>Não paga</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} — ${money(plan.price)}/mês</option>`).join('')}</select></label><label>Fim do período atual<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" ${subscription.id ? '' : 'required'} /></label><label>Motivo da alteração<textarea name="reason" required minlength="5" maxlength="500" placeholder="Ex.: pagamento confirmado manualmente pelo financeiro"></textarea></label><div class="modal-summary"><span><small>SAÚDE DO ACESSO</small><strong>${entitlement(subscription)}</strong></span><span><small>VALOR DO PLANO</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar com auditoria</button></footer></form></div>`;
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GESTÃO DE ACESSO</p><h2 id="modal-title">Assinatura de ${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="accountId" value="${accountId}"/><div class="modal-alert"><strong>Atenção à cobrança</strong><p>Esta ação altera o acesso interno. A recorrência do Mercado Pago ainda precisa ser gerenciada separadamente.</p></div><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="unpaid" ${subscription.status === 'unpaid' ? 'selected' : ''}>Não paga</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} — ${money(plan.price)}/mês</option>`).join('')}</select></label><label>Fim do período atual<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" ${subscription.id ? '' : 'required'} /></label><label>Motivo da alteração<textarea name="reason" required minlength="5" maxlength="500" placeholder="Ex.: pagamento confirmado manualmente pelo financeiro"></textarea></label><div class="modal-summary"><span><small>SAÚDE DO ACESSO</small><strong>${entitlement(subscription)}</strong></span><span><small>VALOR DO PLANO</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar com auditoria</button></footer></form></div>`;
   }
 
   function tenantModal(tenant) {
@@ -500,12 +537,20 @@
     const source = state.modal?.id ? state.plans.find((plan) => String(plan.id) === String(state.modal.id)) : null;
     const duplicate = Boolean(state.modal?.duplicate);
     const editing = Boolean(source && !duplicate);
-    const permissions = (source?.plan_permissions || []).map((permission) => permission.permission_key).join(', ');
+    const selectedPermissions = new Set((source?.plan_permissions || []).map((permission) => permission.permission_key));
+    const catalogKeys = new Set(permissionDefinitions().map((permission) => permission.key));
+    const legacyPermissions = [...selectedPermissions].filter((key) => !catalogKeys.has(key));
+    const selectedCount = selectedPermissions.size;
     const name = duplicate ? `${source?.name || ''} Cópia` : source?.name || '';
     const slug = duplicate ? `${source?.slug || 'plano'}-copia` : source?.slug || '';
     const recurring = source ? source.recurring !== false : true;
     const preapprovalPlanId = duplicate ? '' : source?.preapproval_plan_id || '';
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal plan-modal" data-form="plan"><header><div><p class="eyebrow">CATÁLOGO COMERCIAL</p><h2 id="modal-title">${editing ? `Editar ${escape(source.name)}` : duplicate ? 'Duplicar plano' : 'Criar novo plano'}</h2><p>Preço, recorrência, limites, cobrança e permissões em um único lugar.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="id" value="${editing ? source.id : ''}"/><div class="form-grid"><label>Nome do plano<input name="name" required maxlength="120" value="${escape(name)}" placeholder="Profissional" /></label><label>Identificador interno<input name="slug" required maxlength="80" pattern="[a-z0-9_-]+" value="${escape(slug)}" placeholder="profissional" /></label><label class="wide">Descrição comercial<textarea name="description" maxlength="500" placeholder="Para quem é este plano e qual seu principal benefício?">${escape(source?.description || '')}</textarea></label><label>Preço<input name="price" type="number" step="0.01" min="0" required value="${source?.price ?? ''}" placeholder="199,00" /></label><label>Máximo de lojas<input name="stores" type="number" min="1" step="1" required value="${source?.max_stores || 1}" /></label><label>Trial (dias)<input name="trial" type="number" min="0" step="1" value="${source?.trial_period_days || 0}" /></label><label>Descrição no Mercado Pago<input name="mpReason" maxlength="255" value="${escape(source?.mp_reason || '')}" placeholder="ChefOS Profissional" /></label><label class="wide">ID do plano recorrente no Mercado Pago<input name="preapprovalPlanId" maxlength="255" value="${escape(preapprovalPlanId)}" placeholder="2c938084..." /><small>Ao duplicar um plano, este vínculo não é copiado.</small></label><label class="wide">Permissões separadas por vírgula<textarea name="permissions" placeholder="/dashboard, /pos, /reports">${escape(permissions)}</textarea></label></div><div class="choice-grid"><label><input type="checkbox" name="recurring" ${recurring ? 'checked' : ''}/><span><strong>Cobrança recorrente</strong><small>Renovação mensal do acesso</small></span></label><label><input type="checkbox" name="popular" ${source?.isMostPopular && !duplicate ? 'checked' : ''}/><span><strong>Destacar como mais popular</strong><small>Remove o destaque dos demais planos</small></span></label></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">${editing ? 'Salvar alterações' : 'Criar plano'}</button></footer></form></div>`;
+    const permissionGroups = state.permissionCatalog.map((group) => {
+      const groupSelected = group.permissions.filter((permission) => selectedPermissions.has(permission.key)).length;
+      return `<section class="permission-group" data-permission-group="${escape(group.id)}"><header><span><strong>${escape(group.name)}</strong><small>${escape(group.description)}</small></span><span><b data-permission-group-count>${groupSelected}/${group.permissions.length}</b><button type="button" data-action="toggle-permission-group">${groupSelected === group.permissions.length ? 'Desmarcar grupo' : 'Selecionar grupo'}</button></span></header><div class="permission-options">${group.permissions.map((permission) => `<label class="permission-option" data-permission-text="${escape(`${permission.name} ${permission.description} ${group.name}`)}"><input type="checkbox" name="permissions" value="${escape(permission.key)}" ${selectedPermissions.has(permission.key) ? 'checked' : ''}/><i>✓</i><span><strong>${escape(permission.name)}</strong><small>${escape(permission.description)}</small></span></label>`).join('')}</div></section>`;
+    }).join('');
+    const preservedLegacy = legacyPermissions.map((key) => `<input type="hidden" name="permissions" value="${escape(key)}"/>`).join('');
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal plan-modal" data-form="plan"><header><div><p class="eyebrow">CATÁLOGO COMERCIAL</p><h2 id="modal-title">${editing ? `Editar ${escape(source.name)}` : duplicate ? 'Duplicar plano' : 'Criar novo plano'}</h2><p>Configure a oferta comercial e escolha visualmente os módulos incluídos.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="id" value="${editing ? source.id : ''}"/><div class="form-grid"><label>Nome do plano<input name="name" required maxlength="120" value="${escape(name)}" placeholder="Profissional" /></label><label>Identificador interno<input name="slug" required maxlength="80" pattern="[a-z0-9_-]+" value="${escape(slug)}" placeholder="profissional" /></label><label class="wide">Descrição comercial<textarea name="description" maxlength="500" placeholder="Para quem é este plano e qual seu principal benefício?">${escape(source?.description || '')}</textarea></label><label>Preço<input name="price" type="number" step="0.01" min="0" required value="${source?.price ?? ''}" placeholder="199,00" /></label><label>Máximo de lojas<input name="stores" type="number" min="1" step="1" required value="${source?.max_stores || 1}" /></label><label>Período de teste (dias)<input name="trial" type="number" min="0" step="1" value="${source?.trial_period_days || 0}" /></label><label>Descrição no Mercado Pago<input name="mpReason" maxlength="255" value="${escape(source?.mp_reason || '')}" placeholder="ChefOS Profissional" /></label><label class="wide">ID do plano recorrente no Mercado Pago<input name="preapprovalPlanId" maxlength="255" value="${escape(preapprovalPlanId)}" placeholder="2c938084..." /><small>Ao duplicar um plano, este vínculo não é copiado.</small></label></div><div class="choice-grid"><label><input type="checkbox" name="recurring" ${recurring ? 'checked' : ''}/><span><strong>Cobrança recorrente</strong><small>Renovação mensal do acesso</small></span></label><label><input type="checkbox" name="popular" ${source?.isMostPopular && !duplicate ? 'checked' : ''}/><span><strong>Destacar como mais popular</strong><small>Remove o destaque dos demais planos</small></span></label></div><section class="permission-picker"><header><div><p class="eyebrow">MÓDULOS INCLUÍDOS</p><h3>O que o cliente poderá usar?</h3><small>Selecione pelas funções do ChefOS, sem precisar conhecer códigos internos.</small></div><strong data-permission-count>${selectedCount} módulo(s) selecionado(s)</strong></header><div class="permission-toolbar"><label><span>⌕</span><input type="search" data-permission-search aria-label="Buscar módulo" placeholder="Buscar módulo ou funcionalidade" /></label><button type="button" class="secondary" data-action="select-all-permissions">Selecionar todos</button><button type="button" class="text-button" data-action="clear-permissions">Limpar seleção</button></div>${preservedLegacy}${legacyPermissions.length ? `<div class="legacy-permission-note"><i>i</i><span><strong>${legacyPermissions.length} acesso(s) de compatibilidade preservado(s)</strong><small>Eles não aparecem no catálogo atual, mas não serão removidos ao salvar.</small></span></div>` : ''}<div class="permission-groups">${permissionGroups || '<div class="empty">O catálogo de módulos não foi carregado.</div>'}</div><div class="permission-empty" data-permission-empty hidden>Nenhum módulo encontrado para esta busca.</div></section></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">${editing ? 'Salvar alterações' : 'Criar plano'}</button></footer></form></div>`;
   }
 
   function catalogItemModal() {
@@ -603,8 +648,11 @@
     }
     if (form.dataset.form === 'plan') {
       const editing = Boolean(values.id);
-      await api('/api/admin/plans', { method: editing ? 'PUT' : 'POST', body: { id: values.id || undefined, plan: { name: values.name, slug: values.slug, description: values.description, price: Number(values.price), trial_period_days: Number(values.trial), max_stores: Number(values.stores), recurring: values.recurring === 'on', isMostPopular: values.popular === 'on', preapproval_plan_id: values.preapprovalPlanId, mp_reason: values.mpReason }, permissions: String(values.permissions || '').split(',').map((item) => item.trim()).filter(Boolean) } });
-      state.plans = (await api('/api/admin/plans')).data || [];
+      const permissions = [...new Set(new FormData(form).getAll('permissions').map((key) => String(key)).filter(Boolean))];
+      await api('/api/admin/plans', { method: editing ? 'PUT' : 'POST', body: { id: values.id || undefined, plan: { name: values.name, slug: values.slug, description: values.description, price: Number(values.price), trial_period_days: Number(values.trial), max_stores: Number(values.stores), recurring: values.recurring === 'on', isMostPopular: values.popular === 'on', preapproval_plan_id: values.preapprovalPlanId, mp_reason: values.mpReason }, permissions } });
+      const plans = await api('/api/admin/plans');
+      state.plans = plans.data || [];
+      state.permissionCatalog = plans.permissionCatalog || state.permissionCatalog;
       state.modal = null;
       showNotice(editing ? 'Plano atualizado com sucesso.' : 'Plano criado com sucesso.');
       return;
@@ -655,6 +703,20 @@
     if (action === 'open-plan') { state.modal = { type: 'plan' }; render(); return; }
     if (action === 'edit-plan') { state.modal = { type: 'plan', id: target.dataset.id }; render(); return; }
     if (action === 'duplicate-plan') { state.modal = { type: 'plan', id: target.dataset.id, duplicate: true }; render(); return; }
+    if (action === 'select-all-permissions' || action === 'clear-permissions') {
+      const form = target.closest('form');
+      form?.querySelectorAll('input[type="checkbox"][name="permissions"]').forEach((checkbox) => { checkbox.checked = action === 'select-all-permissions'; });
+      updatePermissionSummary(form);
+      return;
+    }
+    if (action === 'toggle-permission-group') {
+      const form = target.closest('form');
+      const checkboxes = [...target.closest('[data-permission-group]')?.querySelectorAll('input[name="permissions"]') || []];
+      const shouldSelect = checkboxes.some((checkbox) => !checkbox.checked);
+      checkboxes.forEach((checkbox) => { checkbox.checked = shouldSelect; });
+      updatePermissionSummary(form);
+      return;
+    }
     if (action === 'open-catalog-item') { state.modal = { type: 'catalog-item' }; render(); return; }
     if (action === 'edit-catalog-item') { state.modal = { type: 'catalog-item', id: target.dataset.id }; render(); return; }
     if (action === 'generate-password') {
@@ -712,6 +774,8 @@
   }));
 
   document.addEventListener('input', (event) => {
+    const permissionSearch = event.target.closest('[data-permission-search]');
+    if (permissionSearch) { filterPermissionOptions(permissionSearch); return; }
     const input = event.target.closest('[data-search]');
     if (!input) return;
     const key = input.dataset.search;
@@ -721,6 +785,8 @@
   });
 
   document.addEventListener('change', (event) => safe(async () => {
+    const permission = event.target.closest('input[type="checkbox"][name="permissions"]');
+    if (permission) { updatePermissionSummary(permission.closest('form')); return; }
     const filter = event.target.closest('[data-filter]');
     if (filter) { state.filters[filter.dataset.filter] = filter.value; render(); return; }
     const customerSelect = event.target.closest('[data-action="select-tenant"]');

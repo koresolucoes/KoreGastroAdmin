@@ -9,6 +9,7 @@ const required = [
   'public/app.js',
   'public/admin.css',
   'api/_lib/admin.js',
+  'api/_lib/plan-permissions.js',
   'api/_lib/customers.js',
   'api/admin/session.js',
   'api/admin/customers.js',

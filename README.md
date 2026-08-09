@@ -10,7 +10,7 @@ Aplicação independente para operar o painel administrativo do ChefOS. Ela reut
 - visão 360º de clientes, lojas, assinatura, onboarding, atividade, suporte e cardápios;
 - exportação CSV de clientes e assinaturas;
 - onboarding que cria ou reutiliza o usuário pelo e-mail, sem exigir UUID;
-- gestão de planos com edição, duplicação, recorrência, Mercado Pago e permissões;
+- gestão de planos com edição, duplicação, recorrência, Mercado Pago e seletor visual de módulos em português;
 - gestão de cardápios por cliente e loja, com criação, edição, filtros e disponibilidade;
 - saúde, auditoria e acessos administrativos.
 
