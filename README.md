@@ -14,6 +14,24 @@ Aplicação independente para operar o painel administrativo do ChefOS. Ela reut
 - gestão de cardápios por cliente e loja, com criação, edição, filtros e disponibilidade;
 - saúde, auditoria e acessos administrativos.
 
+## Centro de segurança e confiabilidade
+
+- papéis administrativos: Proprietário, Administrador, Financeiro, Suporte e Auditor;
+- autorização por capacidade em todas as APIs, com modo compatível durante a migração;
+- convite real pelo Supabase Auth, ciclo de vida `invited`, `active`, `suspended` e `revoked`;
+- aceite de convite com definição de senha, ativação automática e cadastro/desafio TOTP para MFA;
+- bloqueio de autoexclusão, proteção de administradores raiz e garantia do último proprietário no banco;
+- auditoria administrativa estruturada, redigida e com dupla gravação temporária em `system_logs`;
+- filtros, paginação, resultado, risco, antes/depois e exportação CSV na central de auditoria;
+- saúde dividida em infraestrutura, negócio e segurança, incluindo assinaturas vencidas, cobrança, iFood, SLA e MFA;
+- histórico de diagnósticos e estrutura para gestão de incidentes.
+
+### Aplicar a migração administrativa
+
+Execute `supabase/migrations/202608090001_admin_control_center.sql` no SQL Editor do mesmo projeto Supabase usado pelo ChefOS antes de ativar os novos controles. A migração é aditiva, preserva os e-mails atuais e transforma o primeiro administrador existente em Proprietário caso ainda não exista um.
+
+Após validar que todos os administradores privilegiados possuem segundo fator, configure `ADMIN_ENFORCE_MFA=true` na Vercel. Enquanto estiver `false`, a tela de Saúde apresentará a implantação de MFA como ponto de atenção sem bloquear a operação.
+
 ## O que foi extraído
 
 | Painel original | Nova rota | Operações |
@@ -49,6 +67,7 @@ As rotas legadas continuam disponíveis por compatibilidade: `/api/v2/admin/*` a
 - Entradas administrativas são validadas por UUID, enum e tamanho antes de acessar o banco.
 - O build executa verificação de sintaxe em todas as funções e bloqueia arquivos truncados antes do deploy.
 - Administradores definidos em `ROOT_ADMIN_EMAILS` não podem ser removidos pela interface.
+- Escritas diretas de usuários autenticados em `system_admins` são revogadas pela migração; alterações passam pela API com trilha de auditoria.
 - O CORS é fechado por padrão; preencha `ADMIN_ALLOWED_ORIGINS` apenas se o frontend e a API estiverem em domínios diferentes.
 
 ## Publicar na Vercel

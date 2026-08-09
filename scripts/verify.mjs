@@ -19,7 +19,11 @@ const required = [
   'api/admin/messages.js',
   'api/admin/plans.js',
   'api/admin/tenant-menu.js',
-  'api/admin/provision-tenant.js'
+  'api/admin/provision-tenant.js',
+  'api/admin/administrators.js',
+  'api/admin/health.js',
+  'api/admin/logs.js',
+  'supabase/migrations/202608090001_admin_control_center.sql'
 ];
 
 async function sourceFiles(directory) {
@@ -42,6 +46,25 @@ if (!v2Rewrite) throw new Error('Compatibilidade /api/v2/admin ausente no vercel
 const appSource = await readFile('public/app.js', 'utf8');
 for (const endpoint of ['/api/admin/customers', '/api/admin/dashboard', '/api/admin/subscriptions', '/api/admin/tickets', '/api/admin/plans', '/api/admin/tenant-menu', '/api/admin/provision-tenant']) {
   if (!appSource.includes(endpoint)) throw new Error(`Frontend não consome o endpoint obrigatório ${endpoint}`);
+}
+
+for (const endpoint of ['/api/admin/administrators', '/api/admin/health', '/api/admin/logs']) {
+  if (!appSource.includes(endpoint)) throw new Error(`Frontend não consome o endpoint de controle ${endpoint}`);
+}
+
+for (const marker of ['invite-password', '/factors/', 'challenge_id', 'mfaMode']) {
+  if (!appSource.includes(marker)) throw new Error(`Fluxo de convite/MFA incompleto: ${marker}`);
+}
+
+const adminSource = await readFile('api/_lib/admin.js', 'utf8');
+const accessSource = await readFile('api/admin/administrators.js', 'utf8');
+for (const marker of ['access.root', 'ADMIN_ENFORCE_MFA', 'admin_audit_events', 'CAPABILITY_REQUIRED']) {
+  if (!`${adminSource}\n${accessSource}`.includes(marker)) throw new Error(`Fundação de segurança incompleta: ${marker}`);
+}
+
+const migrationSource = await readFile('supabase/migrations/202608090001_admin_control_center.sql', 'utf8');
+for (const marker of ['drop policy if exists "Admins can manage admins"', 'protect_last_admin_owner', 'admin_health_snapshots', 'admin_audit_events']) {
+  if (!migrationSource.includes(marker)) throw new Error(`Migração administrativa incompleta: ${marker}`);
 }
 
 const files = (await Promise.all(['api', 'public', 'scripts'].map((directory) => sourceFiles(resolve(directory))))).flat();

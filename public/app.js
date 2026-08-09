@@ -3,8 +3,12 @@
 
   const config = window.KORE_ADMIN_CONFIG || {};
   const app = document.querySelector('#app');
+  const authHash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const inviteToken = authHash.get('type') === 'invite' ? authHash.get('access_token') : '';
   const state = {
-    token: sessionStorage.getItem('koregastro_admin_token') || '',
+    token: inviteToken || sessionStorage.getItem('koregastro_admin_token') || '',
+    inviteMode: Boolean(inviteToken),
+    mfaMode: null,
     user: null,
     section: 'overview',
     loading: false,
@@ -24,13 +28,20 @@
     selectedStore: '',
     selectedTicketId: '',
     admins: null,
+    adminSummary: null,
+    adminRoles: [],
+    adminMeta: null,
     health: null,
     logs: null,
     notice: null,
     modal: null,
     sidebarOpen: false,
     globalQuery: '',
-    filters: { customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active', catalog: '', catalogCategory: 'all', catalogStatus: 'all' }
+    filters: {
+      customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active',
+      catalog: '', catalogCategory: 'all', catalogStatus: 'all', auditQuery: '', auditCategory: 'all',
+      auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1
+    }
   };
 
   const navigation = [
@@ -65,6 +76,12 @@
   const normalize = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const includes = (haystack, needle) => normalize(haystack).includes(normalize(needle));
   const toInputDate = (value) => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toISOString().slice(0, 10) : '';
+  const can = (capability) => Boolean(state.user?.capabilities?.includes('*') || state.user?.capabilities?.includes(capability));
+  const roleLabel = (role) => ({ owner: 'Proprietário', platform_admin: 'Administrador', finance: 'Financeiro', support: 'Suporte', auditor: 'Auditor' }[role] || role || 'Administrador');
+  const accessStatusLabel = (value) => ({ invited: 'Convite pendente', active: 'Ativo', suspended: 'Suspenso', revoked: 'Revogado' }[value] || value || 'Desconhecido');
+  const healthStatusLabel = (value) => ({ ok: 'Operacional', attention: 'Atenção', degraded: 'Degradado', critical: 'Crítico', unknown: 'Desconhecido', healthy: 'Operacional' }[value] || value);
+  const auditOutcomeLabel = (value) => ({ success: 'Sucesso', failure: 'Falha', blocked: 'Bloqueado' }[value] || value || 'Sucesso');
+  const prettyJson = (value) => value ? JSON.stringify(value, null, 2) : '';
 
   function randomPassword() {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
@@ -180,6 +197,64 @@
     return body;
   }
 
+  async function authRequest(path, options = {}) {
+    const response = await fetch(`${String(config.supabaseUrl).replace(/\/$/, '')}/auth/v1${path}`, {
+      method: options.method || 'GET',
+      headers: { apikey: config.supabaseAnonKey, Authorization: `Bearer ${state.token}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}) },
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.msg || body.message || body.error_description || 'Não foi possível validar o segundo fator.');
+    return body;
+  }
+
+  async function startMfaEnrollment() {
+    const enrolled = await authRequest('/factors', {
+      method: 'POST',
+      body: { factor_type: 'totp', friendly_name: 'ChefOS Control Center', issuer: 'ChefOS' }
+    });
+    const qrCode = enrolled.totp?.qr_code || '';
+    state.mfaMode = {
+      type: 'enroll',
+      factorId: enrolled.id,
+      qrCode: qrCode.startsWith('data:') ? qrCode : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrCode)}`,
+      secret: enrolled.totp?.secret || '',
+      uri: enrolled.totp?.uri || ''
+    };
+  }
+
+  async function prepareMfa(authUser = null) {
+    const privileged = Boolean(state.user?.mfaRequired || ['owner', 'platform_admin'].includes(state.user?.role));
+    if (!privileged || state.user?.mfaVerified) return false;
+    const user = authUser?.factors ? authUser : await authRequest('/user');
+    const factor = user?.factors?.find((item) => item.factor_type === 'totp' && item.status === 'verified');
+    if (factor) state.mfaMode = { type: 'challenge', factorId: factor.id };
+    else {
+      const pending = user?.factors?.find((item) => item.factor_type === 'totp' && item.status === 'unverified');
+      if (pending) await authRequest(`/factors/${encodeURIComponent(pending.id)}`, { method: 'DELETE' });
+      await startMfaEnrollment();
+    }
+    state.loading = false;
+    render();
+    return true;
+  }
+
+  async function verifyMfa(code) {
+    const challenge = await authRequest(`/factors/${encodeURIComponent(state.mfaMode.factorId)}/challenge`, {
+      method: 'POST', body: { factorId: state.mfaMode.factorId }
+    });
+    const verified = await authRequest(`/factors/${encodeURIComponent(state.mfaMode.factorId)}/verify`, {
+      method: 'POST', body: { challenge_id: challenge.id, code: String(code || '').replace(/\s/g, '') }
+    });
+    if (!verified.access_token) throw new Error('O Supabase não retornou a sessão AAL2 esperada.');
+    state.token = verified.access_token;
+    sessionStorage.setItem('koregastro_admin_token', state.token);
+    state.mfaMode = null;
+    state.user = (await api('/api/admin/session')).data;
+    await loadCore();
+    showNotice('Segundo fator confirmado. Sessão administrativa protegida.');
+  }
+
   async function signIn(email, password) {
     const response = await fetch(`${String(config.supabaseUrl).replace(/\/$/, '')}/auth/v1/token?grant_type=password`, {
       method: 'POST',
@@ -191,6 +266,26 @@
     state.token = body.access_token;
     sessionStorage.setItem('koregastro_admin_token', state.token);
     state.user = (await api('/api/admin/session')).data;
+    return !(await prepareMfa(body.user));
+  }
+
+  async function finishInvitation(password, confirmation) {
+    if (password !== confirmation) throw new Error('As senhas informadas não coincidem.');
+    if (password.length < 10) throw new Error('Use uma senha com pelo menos 10 caracteres.');
+    const response = await fetch(`${String(config.supabaseUrl).replace(/\/$/, '')}/auth/v1/user`, {
+      method: 'PUT',
+      headers: { apikey: config.supabaseAnonKey, Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.msg || body.message || body.error_description || 'Não foi possível concluir o convite.');
+    sessionStorage.setItem('koregastro_admin_token', state.token);
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    state.inviteMode = false;
+    state.user = (await api('/api/admin/session')).data;
+    if (await prepareMfa()) return;
+    await loadCore();
+    showNotice('Convite aceito. Seu acesso administrativo está ativo.');
   }
 
   async function signOut() {
@@ -200,7 +295,7 @@
       });
     } finally {
       sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, health: null, logs: null });
+      Object.assign(state, { token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null });
       render();
     }
   }
@@ -252,15 +347,34 @@
         state.menuMeta = menu.meta || null;
       }
     }
-    if (section === 'administrators' && (force || !state.admins)) state.admins = (await api('/api/admin/administrators')).data || [];
+    if (section === 'administrators' && (force || !state.admins)) {
+      const access = await api('/api/admin/administrators');
+      state.admins = access.data || [];
+      state.adminSummary = access.summary || null;
+      state.adminRoles = access.roles || [];
+      state.adminMeta = access.meta || null;
+    }
     if (section === 'health' && (force || !state.health)) state.health = await api('/api/admin/health');
-    if (section === 'logs' && (force || !state.logs)) state.logs = (await api('/api/admin/logs')).data || [];
+    if (section === 'logs' && (force || !state.logs)) {
+      const filters = state.filters;
+      const query = new URLSearchParams({
+        page: String(filters.auditPage || 1), pageSize: '40', q: filters.auditQuery || '',
+        category: filters.auditCategory || 'all', outcome: filters.auditOutcome || 'all',
+        actor: filters.auditActor || '', from: filters.auditFrom || '', to: filters.auditTo || ''
+      });
+      state.logs = await api(`/api/admin/logs?${query}`);
+    }
+  }
+
+  function authNotice() {
+    if (!state.notice) return '';
+    return `<div class='notice auth-notice ${escape(state.notice.type)}' role='status'><span>${state.notice.type === 'error' ? '!' : '✓'}</span>${escape(state.notice.text)}<button type='button' data-action='dismiss-notice' aria-label='Fechar'>×</button></div>`;
   }
 
   function loginView() {
     return `<section class="login-shell">
       <div class="login-brand"><span class="brand-mark">C</span><strong>ChefOS</strong><small>Control Center</small></div>
-      <form class="login-card" data-form="login">
+      <form class="login-card" data-form="login">${authNotice()}
         <p class="eyebrow">ACESSO ADMINISTRATIVO</p>
         <h1>Bem-vindo ao centro de comando.</h1>
         <p class="muted">Gerencie toda a operação ChefOS com uma conta autorizada.</p>
@@ -270,6 +384,15 @@
         <small class="secure-note"><i></i>Sessão protegida pelo Supabase</small>
       </form>
     </section>`;
+  }
+
+  function inviteView() {
+    return `<section class='login-shell invite-acceptance'><div class='login-brand'><span class='brand-mark'>C</span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card' data-form='invite-password'>${authNotice()}<p class='eyebrow'>CONVITE ADMINISTRATIVO</p><h1>Proteja seu novo acesso.</h1><p class='muted'>Defina uma senha forte para concluir o convite e entrar no centro de controle.</p><label>Nova senha<input name='password' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Mínimo de 10 caracteres' /></label><label>Confirmar senha<input name='confirmation' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Repita a senha' /></label><div class='login-security'><span>✓</span><p><strong>Ativação auditada</strong><small>A conta só será ativada após a confirmação do e-mail.</small></p></div><button class='primary wide-button' type='submit'>Aceitar convite e entrar →</button></form></section>`;
+  }
+
+  function mfaView() {
+    const enrollment = state.mfaMode?.type === 'enroll';
+    return `<section class='login-shell mfa-shell'><div class='login-brand'><span class='brand-mark'>C</span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card mfa-card' data-form='mfa'>${authNotice()}<p class='eyebrow'>SEGUNDO FATOR</p><h1>${enrollment ? 'Proteja sua conta administrativa.' : 'Confirme que é você.'}</h1><p class='muted'>${enrollment ? 'Escaneie o QR Code no Google Authenticator, Microsoft Authenticator, 1Password ou aplicativo compatível.' : 'Abra seu aplicativo autenticador e informe o código atual.'}</p>${enrollment ? `<div class='mfa-setup'><img src='${escape(state.mfaMode.qrCode)}' alt='QR Code para cadastrar o segundo fator' /><div><small>CHAVE MANUAL</small><code>${escape(state.mfaMode.secret)}</code><button type='button' class='text-button' data-action='copy-mfa-secret'>Copiar chave</button></div></div>` : `<div class='mfa-prompt'><span>⌁</span><div><strong>Autenticador cadastrado</strong><small>O código muda a cada 30 segundos.</small></div></div>`}<label>Código de 6 dígitos<input name='code' type='text' inputmode='numeric' autocomplete='one-time-code' required minlength='6' maxlength='6' pattern='[0-9]{6}' placeholder='000000' /></label><button class='primary wide-button' type='submit'>${enrollment ? 'Ativar MFA e entrar →' : 'Verificar e entrar →'}</button><button class='quiet mfa-logout' type='button' data-action='logout'>Sair e usar outra conta</button></form></section>`;
   }
 
   function missingConfigView() {
@@ -491,7 +614,7 @@
       </div></section>`;
   }
 
-  function health() {
+  function legacyHealth() {
     const data = state.health || {};
     const healthy = data.status === 'healthy';
     return `<section class="page">${pageHeader('OBSERVABILIDADE', 'Saúde do sistema', 'Conectividade, ambiente e desempenho dos serviços administrativos.', `<button class="secondary" data-action="reload-health">↻ Executar verificação</button>`)}
@@ -501,16 +624,80 @@
     </section>`;
   }
 
-  function logs() {
+  function legacyLogs() {
     return `<section class="page">${pageHeader('GOVERNANÇA', 'Auditoria do sistema', 'Últimos eventos registrados pelas operações administrativas.', `<button class="secondary" data-action="reload-logs">↻ Atualizar eventos</button>`)}
       <div class="panel timeline">${(state.logs || []).map((log) => `<article><span class="timeline-dot"></span><div><header><strong>${escape(log.action || log.event_type || 'Evento')}</strong><time>${date(log.created_at)}</time></header><p>${escape(typeof log.details === 'object' ? JSON.stringify(log.details) : log.description || log.details || 'Sem descrição adicional')}</p></div></article>`).join('') || '<p class="empty">Nenhum evento de auditoria encontrado.</p>'}</div>
     </section>`;
   }
 
-  function administrators() {
+  function legacyAdministrators() {
     return `<section class="page">${pageHeader('SEGURANÇA E ACESSO', 'Administradores', 'Controle quem pode operar o Control Center do ChefOS.', '')}
       <div class="access-layout"><div class="panel"><div class="panel-heading"><div><p class="eyebrow">EQUIPE</p><h2>Acessos ativos</h2></div><span class="count-badge">${state.admins?.length || 0}</span></div><div class="admin-list">${(state.admins || []).map((admin) => `<div><span class="avatar">${initials(admin.email)}</span><span><strong>${escape(admin.email)}</strong><small>${admin.protected ? 'Administrador raiz' : 'Administrador'} · desde ${day(admin.created_at)}</small></span>${admin.protected ? '<span class="root-badge">Protegido</span>' : `<button class="danger-link" data-action="delete-admin" data-email="${escape(admin.email)}">Remover</button>`}</div>`).join('') || '<p class="empty">Nenhum administrador encontrado.</p>'}</div></div>
         <form class="panel invite-card" data-form="admin"><span class="invite-icon">＋</span><p class="eyebrow">NOVO ACESSO</p><h2>Adicionar administrador</h2><p class="muted">O usuário precisa existir no Supabase Auth para conseguir entrar.</p><label>E-mail corporativo<input name="email" type="email" required placeholder="nome@chefos.online" /></label><button class="primary" type="submit">Autorizar acesso</button></form></div>
+    </section>`;
+  }
+
+  function healthCheckCard(item) {
+    const action = item.action?.section
+      ? `<button class='text-button' data-action='health-navigate' data-section='${escape(item.action.section)}' data-filter='${escape(item.action.filter || '')}'>Investigar →</button>`
+      : '';
+    return `<article class='health-check health-${escape(item.status)}'><span class='health-check-icon'>${item.status === 'ok' ? '✓' : item.status === 'unknown' ? '?' : '!'}</span><div><header><strong>${escape(item.label)}</strong><span>${escape(healthStatusLabel(item.status))}</span></header><p>${escape(item.message || '')}</p>${item.latencyMs !== undefined ? `<small>${item.latencyMs} ms</small>` : item.value !== undefined ? `<small>Valor observado: ${item.value}</small>` : ''}</div>${action}</article>`;
+  }
+
+  function health() {
+    const data = state.health || {};
+    const labels = {
+      healthy: ['Tudo operacional', 'Os fluxos essenciais responderam normalmente.', '✓'],
+      attention: ['Pontos de atenção', 'Existem configurações ou indicadores que merecem acompanhamento.', '!'],
+      degraded: ['Operação degradada', 'Um ou mais fluxos do ChefOS precisam de intervenção.', '!'],
+      critical: ['Incidente crítico', 'Um serviço essencial não respondeu corretamente.', '!'],
+      unknown: ['Estado desconhecido', 'Ainda não existem informações suficientes para o diagnóstico.', '?']
+    };
+    const hero = labels[data.status] || labels.unknown;
+    const summary = data.summary || { operational: 0, attention: 0, degraded: 0, total: 0 };
+    const groups = [
+      ['core', 'Infraestrutura', 'Banco, autenticação e configuração administrativa.'],
+      ['business', 'Saúde do negócio', 'Assinaturas, cobranças, integrações e suporte.'],
+      ['security', 'Segurança', 'Acessos privilegiados, MFA e modelo de autorização.']
+    ];
+    return `<section class='page health-center'>${pageHeader('CENTRO DE CONFIABILIDADE', 'Saúde do ChefOS', 'Disponibilidade técnica, fluxos do negócio e segurança em uma única visão.', can('health.run') ? `<button class='primary' data-action='reload-health'>↻ Executar diagnóstico</button>` : '')}
+      <div class='health-hero health-overall-${escape(data.status || 'unknown')}'><div><i>${hero[2]}</i><span><small>STATUS GERAL</small><strong>${hero[0]}</strong><p>${hero[1]}</p></span></div><span><small>ÚLTIMA VERIFICAÇÃO</small><strong>${data.timestamp ? relative(data.timestamp) : '—'}</strong><p>${data.latencyMs ?? '—'} ms · deploy ${escape(data.system?.deployment || 'local')}</p></span></div>
+      <div class='summary-strip health-summary'><div><span>Verificações</span><strong>${summary.total}</strong></div><div><span>Operacionais</span><strong class='success-text'>${summary.operational}</strong></div><div><span>Atenção</span><strong class='warning-text'>${summary.attention}</strong></div><div><span>Degradadas</span><strong class='danger-text'>${summary.degraded}</strong></div></div>
+      <div class='health-domain-grid'>${groups.map(([key, title, description]) => `<section class='panel health-domain'><header><span><p class='eyebrow'>${escape(key.toUpperCase())}</p><h2>${title}</h2><small>${description}</small></span><b>${data.groups?.[key]?.length || 0}</b></header><div>${(data.groups?.[key] || []).map(healthCheckCard).join('') || `<p class='empty'>Sem verificações disponíveis.</p>`}</div></section>`).join('')}</div>
+      <div class='health-lower-grid'><section class='panel health-history'><div class='panel-heading'><div><p class='eyebrow'>HISTÓRICO</p><h2>Últimos diagnósticos</h2></div><span class='count-badge'>${data.history?.length || 0}</span></div><div class='health-history-track'>${(data.history || []).map((item) => `<span class='history-${escape(item.overall_status)}' title='${escape(`${date(item.checked_at)} · ${healthStatusLabel(item.overall_status)}`)}'><i></i><small>${day(item.checked_at)}</small></span>`).join('') || `<p class='empty'>O histórico começa após o primeiro diagnóstico manual.</p>`}</div></section><section class='panel incident-list'><div class='panel-heading'><div><p class='eyebrow'>INCIDENTES</p><h2>Acompanhamento ativo</h2></div><span class='count-badge'>${data.incidents?.length || 0}</span></div>${(data.incidents || []).map((incident) => `<article><span class='severity severity-${escape(incident.severity)}'>${escape(incident.severity)}</span><div><strong>${escape(incident.title)}</strong><small>${escape(incident.service)} · iniciado ${relative(incident.started_at)}</small></div><span>${escape(incident.status)}</span></article>`).join('') || `<div class='all-clear'><i>✓</i><span><strong>Nenhum incidente aberto</strong><small>A operação não possui incidentes registrados.</small></span></div>`}</section></div>
+    </section>`;
+  }
+
+  function auditDescription(event) {
+    if (event.reason) return event.reason;
+    const target = [event.target_type, event.target_id].filter(Boolean).join(' · ');
+    if (target) return target;
+    if (event.metadata?.description) return event.metadata.description;
+    return 'Evento administrativo registrado com sucesso.';
+  }
+
+  function logs() {
+    const payload = state.logs || { data: [], summary: {}, meta: {}, catalogs: {} };
+    const summary = payload.summary || {};
+    const meta = payload.meta || { page: 1, pages: 1, total: 0 };
+    const filters = state.filters;
+    return `<section class='page audit-center'>${pageHeader('GOVERNANÇA E CONTROLE', 'Auditoria administrativa', 'Descubra quem fez o quê, quando, onde e com qual resultado.', `<button class='secondary' data-action='export-audit' ${can('audit.export') ? '' : 'disabled'}>↓ Exportar CSV</button><button class='secondary' data-action='reload-logs'>↻ Atualizar</button>`)}
+      ${meta.legacy ? `<div class='migration-banner'><i>!</i><span><strong>Auditoria em modo de compatibilidade</strong><small>Aplique a migração para habilitar filtros estruturados, antes/depois e resultado das operações.</small></span></div>` : ''}
+      <div class='summary-strip audit-summary'><div><span>Eventos encontrados</span><strong>${summary.total || 0}</strong></div><div><span>Alto risco nesta página</span><strong class='danger-text'>${summary.highRisk || 0}</strong></div><div><span>Falhas e bloqueios</span><strong class='warning-text'>${summary.failures || 0}</strong></div><div><span>Atores nesta página</span><strong>${summary.actors || 0}</strong></div></div>
+      <form class='panel audit-filters' data-form='audit-filter'><label class='audit-search'><span>⌕</span><input name='q' value='${escape(filters.auditQuery)}' placeholder='Buscar ação, recurso ou identificador' /></label><select name='category' aria-label='Categoria'><option value='all'>Todas as categorias</option>${(payload.catalogs?.categories || []).map((item) => `<option value='${escape(item.key)}' ${filters.auditCategory === item.key ? 'selected' : ''}>${escape(item.label)}</option>`).join('')}</select><select name='outcome' aria-label='Resultado'><option value='all'>Todos os resultados</option><option value='success' ${filters.auditOutcome === 'success' ? 'selected' : ''}>Sucesso</option><option value='failure' ${filters.auditOutcome === 'failure' ? 'selected' : ''}>Falha</option><option value='blocked' ${filters.auditOutcome === 'blocked' ? 'selected' : ''}>Bloqueado</option></select><input name='actor' value='${escape(filters.auditActor)}' placeholder='E-mail do ator' /><label class='date-filter'>De<input name='from' type='date' value='${escape(filters.auditFrom)}' /></label><label class='date-filter'>Até<input name='to' type='date' value='${escape(filters.auditTo)}' /></label><button class='primary' type='submit'>Aplicar filtros</button><button class='text-button' type='button' data-action='clear-audit-filters'>Limpar</button></form>
+      <div class='panel table-wrap audit-table'><table><thead><tr><th>Data e hora</th><th>Evento</th><th>Ator</th><th>Categoria</th><th>Resultado</th><th>Risco</th><th></th></tr></thead><tbody>${(payload.data || []).map((event) => `<tr><td><strong>${date(event.created_at)}</strong><small>${event.request_id ? `Req. ${escape(String(event.request_id).slice(0, 12))}` : 'Sem correlação'}</small></td><td><strong>${escape(event.actionLabel || event.action)}</strong><small>${escape(auditDescription(event))}</small></td><td><strong>${escape(event.actor_email || 'Não identificado')}</strong><small>${event.target_type ? `${escape(event.target_type)} · ${escape(event.target_id || '—')}` : 'Ação administrativa'}</small></td><td><span class='category-pill'>${escape(event.categoryLabel || event.category)}</span></td><td><span class='outcome outcome-${escape(event.outcome)}'>${escape(auditOutcomeLabel(event.outcome))}</span></td><td><span class='severity severity-${escape(event.severity)}'>${escape(event.severity || 'low')}</span></td><td><button class='row-action' data-action='view-audit' data-id='${escape(event.id)}'>Detalhes</button></td></tr>`).join('') || `<tr><td colspan='7' class='empty'>Nenhum evento corresponde aos filtros.</td></tr>`}</tbody></table></div>
+      <footer class='pagination'><span>Página ${meta.page || 1} de ${meta.pages || 1} · ${meta.total || 0} evento(s)</span><div><button class='secondary' data-action='audit-page' data-page='${Math.max(1, (meta.page || 1) - 1)}' ${(meta.page || 1) <= 1 ? 'disabled' : ''}>← Anterior</button><button class='secondary' data-action='audit-page' data-page='${Math.min(meta.pages || 1, (meta.page || 1) + 1)}' ${(meta.page || 1) >= (meta.pages || 1) ? 'disabled' : ''}>Próxima →</button></div></footer>
+    </section>`;
+  }
+
+  function administrators() {
+    const summary = state.adminSummary || { total: state.admins?.length || 0, active: 0, invited: 0, suspended: 0, withoutMfa: 0 };
+    const canManage = Boolean(state.adminMeta?.canManage && can('access.manage'));
+    return `<section class='page access-center'>${pageHeader('IDENTIDADE E SEGURANÇA', 'Acessos administrativos', 'Gerencie o ciclo de vida da equipe, funções e segundo fator.', '')}
+      ${state.adminMeta?.legacySchema ? `<div class='migration-banner critical'><i>!</i><span><strong>Proteção avançada ainda não aplicada no banco</strong><small>O painel está compatível, mas papéis, suspensão e bloqueio direto por RLS dependem da migração SQL.</small></span></div>` : ''}
+      <div class='summary-strip access-summary'><div><span>Total da equipe</span><strong>${summary.total || 0}</strong></div><div><span>Ativos</span><strong class='success-text'>${summary.active || 0}</strong></div><div><span>Convites pendentes</span><strong>${summary.invited || 0}</strong></div><div><span>Suspensos</span><strong class='warning-text'>${summary.suspended || 0}</strong></div><div><span>Privilegiados sem MFA</span><strong class='danger-text'>${summary.withoutMfa || 0}</strong></div></div>
+      <div class='access-workspace'><section class='panel access-team'><div class='panel-heading'><div><p class='eyebrow'>EQUIPE ADMINISTRATIVA</p><h2>Pessoas e permissões</h2></div><span class='count-badge'>${state.admins?.length || 0}</span></div><div class='access-table'>${(state.admins || []).map((admin) => `<article><span class='avatar'>${initials(admin.display_name || admin.email)}</span><div class='access-person'><strong>${escape(admin.display_name || admin.email.split('@')[0])}</strong><small>${escape(admin.email)}</small></div><div><small>FUNÇÃO</small><strong>${escape(roleLabel(admin.role))}</strong></div><div><small>STATUS</small><span class='access-status access-${escape(admin.status)}'><i></i>${escape(accessStatusLabel(admin.status))}</span></div><div><small>SEGURANÇA</small><span class='mfa-state ${admin.mfaEnabled ? 'enabled' : 'missing'}'>${admin.mfaEnabled ? '✓ MFA ativo' : admin.mfa_required ? '! MFA pendente' : 'MFA opcional'}</span></div><div><small>ÚLTIMA ATIVIDADE</small><strong>${relative(admin.last_sign_in_at || admin.last_seen_at)}</strong></div>${admin.protected ? `<span class='root-badge'>Raiz protegido</span>` : canManage && (admin.role !== 'owner' || state.adminMeta?.canManageOwners) ? `<button class='row-action' data-action='manage-admin' data-email='${escape(admin.email)}'>Gerenciar</button>` : `<span class='read-only-label'>Somente leitura</span>`}</article>`).join('') || `<p class='empty'>Nenhum administrador encontrado.</p>`}</div></section>
+        <form class='panel invite-card access-invite' data-form='admin'><span class='invite-icon'>＋</span><p class='eyebrow'>NOVO ACESSO</p><h2>Convidar para a equipe</h2><p class='muted'>O ChefOS enviará um convite real e registrará a concessão na auditoria.</p><label>Nome completo<input name='displayName' required maxlength='160' placeholder='Ex.: Ana Martins' /></label><label>E-mail corporativo<input name='email' type='email' required maxlength='254' placeholder='ana@chefos.online' /></label><label>Função<select name='role' required>${state.adminRoles.map((role) => `<option value='${escape(role.key)}'>${escape(role.label)} — ${escape(role.description)}</option>`).join('') || `<option value='support'>Suporte</option>`}</select></label><label>Motivo do acesso<textarea name='reason' required minlength='5' maxlength='500' placeholder='Ex.: nova responsável pelo atendimento'></textarea></label><label class='confirmation-check'><input type='checkbox' name='mfaRequired' checked /><span><strong>Exigir segundo fator</strong><small>Obrigatório para funções privilegiadas.</small></span></label><button class='primary' type='submit' ${canManage ? '' : 'disabled'}>Enviar convite seguro →</button></form></div>
     </section>`;
   }
 
@@ -567,6 +754,19 @@
     return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><section class="modal-card onboarding-success"><header><div><p class="eyebrow">ATIVAÇÃO CONCLUÍDA</p><h2 id="modal-title">Cliente pronto para entrar</h2><p>${auth.userCreated ? 'A conta e a estrutura ChefOS foram criadas.' : 'A conta existente foi reutilizada e a estrutura foi validada.'}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><div class="success-mark">✓</div><div class="credential-list"><div><span><small>E-MAIL DE ACESSO</small><strong>${escape(auth.email || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="email">Copiar</button></div>${auth.userCreated ? `<div><span><small>SENHA INICIAL</small><strong>${escape(state.modal.password || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="password">Copiar</button></div>` : '<div class="credential-note"><i>i</i><span><strong>Senha preservada</strong><small>O e-mail já existia; a senha informada não foi aplicada.</small></span></div>'}<div><span><small>OPERAÇÃO</small><strong>${escape(tenant.storeName || '')}</strong></span></div><div><span><small>PLANO INICIAL</small><strong>${escape(plan?.name || 'Plano configurado')}</strong></span></div><div><span><small>CHAVE DE INTEGRAÇÃO</small><strong class="technical-value">${escape(tenant.apiKey || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="apiKey">Copiar</button></div></div><div class="security-reminder"><strong>Entregue as credenciais por um canal seguro</strong><p>A senha inicial só permanece nesta tela enquanto o modal estiver aberto.</p></div></div><footer><button class="secondary" data-action="close-modal">Fechar</button><button class="primary" data-action="view-provisioned-customer" data-id="${tenant.accountId || ''}">Abrir visão do cliente</button></footer></section></div>`;
   }
 
+  function adminAccessModal() {
+    const admin = (state.admins || []).find((item) => item.email === state.modal?.email);
+    if (!admin) return '';
+    const roles = state.adminRoles.length ? state.adminRoles : [{ key: admin.role, label: roleLabel(admin.role) }];
+    return `<div class='modal-shell' role='dialog' aria-modal='true' aria-labelledby='admin-access-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><form class='modal-card admin-access-modal' data-form='admin-access'><header><div><p class='eyebrow'>GESTÃO DE IDENTIDADE</p><h2 id='admin-access-title'>Acesso de ${escape(admin.display_name || admin.email)}</h2><p>${escape(admin.email)}</p></div><button type='button' class='icon-button' data-action='close-modal' aria-label='Fechar'>×</button></header><div class='modal-body'><input type='hidden' name='email' value='${escape(admin.email)}' /><label>Nome de exibição<input name='displayName' maxlength='160' value='${escape(admin.display_name || '')}' /></label><label>Função<select name='role' required>${roles.map((role) => `<option value='${escape(role.key)}' ${admin.role === role.key ? 'selected' : ''}>${escape(role.label)}</option>`).join('')}</select></label><label>Status<select name='status' required><option value='active' ${admin.status === 'active' ? 'selected' : ''}>Ativo</option><option value='invited' ${admin.status === 'invited' ? 'selected' : ''}>Convite pendente</option><option value='suspended' ${admin.status === 'suspended' ? 'selected' : ''}>Suspenso</option><option value='revoked' ${admin.status === 'revoked' ? 'selected' : ''}>Revogado</option></select></label><label class='confirmation-check'><input type='checkbox' name='mfaRequired' ${admin.mfa_required ? 'checked' : ''} /><span><strong>Exigir segundo fator</strong><small>Ações mutáveis podem exigir uma sessão AAL2.</small></span></label><label>Motivo da alteração<textarea name='reason' required minlength='5' maxlength='500' placeholder='Explique por que o acesso está sendo alterado'></textarea></label><div class='modal-alert'><strong>Alteração auditada</strong><p>Mudanças de função ou status preservam o histórico e nunca apagam a identidade.</p></div></div><footer><button type='button' class='secondary' data-action='close-modal'>Cancelar</button><button class='primary' type='submit'>Salvar acesso</button></footer></form></div>`;
+  }
+
+  function auditEventModal() {
+    const event = state.logs?.data?.find((item) => String(item.id) === String(state.modal?.id));
+    if (!event) return '';
+    return `<div class='modal-shell drawer-shell' role='dialog' aria-modal='true' aria-labelledby='audit-event-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><aside class='detail-drawer audit-drawer'><header><div><p class='eyebrow'>EVENTO DE AUDITORIA</p><h2 id='audit-event-title'>${escape(event.actionLabel || event.action)}</h2></div><button class='icon-button' data-action='close-modal' aria-label='Fechar'>×</button></header><div class='drawer-signals'><span class='category-pill'>${escape(event.categoryLabel || event.category)}</span><span class='outcome outcome-${escape(event.outcome)}'>${escape(auditOutcomeLabel(event.outcome))}</span><span class='severity severity-${escape(event.severity)}'>${escape(event.severity)}</span></div><div class='detail-grid audit-detail-grid'><span><small>ATOR</small><strong>${escape(event.actor_email || 'Não identificado')}</strong></span><span><small>DATA E HORA</small><strong>${date(event.created_at)}</strong></span><span><small>RECURSO</small><strong>${escape(event.target_type || '—')}</strong></span><span><small>IDENTIFICADOR</small><strong>${escape(event.target_id || '—')}</strong></span><span><small>REQUISIÇÃO</small><strong>${escape(event.request_id || '—')}</strong></span><span><small>RESULTADO</small><strong>${escape(auditOutcomeLabel(event.outcome))}</strong></span></div>${event.reason ? `<section class='audit-reason'><small>MOTIVO INFORMADO</small><p>${escape(event.reason)}</p></section>` : ''}<section class='audit-diff'><div><small>ANTES</small>${event.before_state ? `<pre>${escape(prettyJson(event.before_state))}</pre>` : `<p class='empty'>Sem estado anterior.</p>`}</div><div><small>DEPOIS</small>${event.after_state ? `<pre>${escape(prettyJson(event.after_state))}</pre>` : `<p class='empty'>Sem estado posterior.</p>`}</div></section><details class='audit-metadata'><summary>Metadados técnicos</summary><pre>${escape(prettyJson(event.metadata || {}))}</pre></details></aside></div>`;
+  }
+
   function modalView() {
     if (!state.modal) return '';
     if (state.modal.type === 'subscription') return subscriptionModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
@@ -574,6 +774,8 @@
     if (state.modal.type === 'plan') return planModal();
     if (state.modal.type === 'catalog-item') return catalogItemModal();
     if (state.modal.type === 'onboarding-success') return onboardingSuccessModal();
+    if (state.modal.type === 'admin-access') return adminAccessModal();
+    if (state.modal.type === 'audit-event') return auditEventModal();
     return '';
   }
 
@@ -583,7 +785,7 @@
 
   function render(focusKey = '') {
     if (!configured()) { app.innerHTML = missingConfigView(); return; }
-    app.innerHTML = state.user ? shell() : loginView();
+    app.innerHTML = state.inviteMode ? inviteView() : state.mfaMode ? mfaView() : state.user ? shell() : loginView();
     if (focusKey) {
       const input = document.querySelector(`[data-search="${focusKey}"]`);
       if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
@@ -627,6 +829,29 @@
     showNotice('Arquivo CSV preparado com sucesso.');
   }
 
+  async function downloadAuditCsv() {
+    const filters = state.filters;
+    const query = new URLSearchParams({
+      export: '1', q: filters.auditQuery || '', category: filters.auditCategory || 'all',
+      outcome: filters.auditOutcome || 'all', actor: filters.auditActor || '',
+      from: filters.auditFrom || '', to: filters.auditTo || ''
+    });
+    const result = await api(`/api/admin/logs?${query}`);
+    const rows = [['Data', 'Ação', 'Ator', 'Categoria', 'Resultado', 'Risco', 'Recurso', 'ID do recurso', 'Motivo', 'Request ID'], ...(result.data || []).map((event) => [
+      event.created_at, event.actionLabel || event.action, event.actor_email, event.categoryLabel || event.category,
+      auditOutcomeLabel(event.outcome), event.severity, event.target_type || '', event.target_id || '', event.reason || '', event.request_id || ''
+    ])];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(';')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `chefos-auditoria-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotice(`${Math.max(0, rows.length - 1)} evento(s) exportado(s).`);
+  }
+
   document.addEventListener('submit', (event) => safe(async () => {
     const form = event.target.closest('form');
     if (!form) return;
@@ -634,8 +859,18 @@
     const values = Object.fromEntries(new FormData(form));
     if (form.dataset.form === 'login') {
       state.loading = true; render();
-      await signIn(values.email, values.password);
-      await loadCore();
+      const ready = await signIn(values.email, values.password);
+      if (ready) await loadCore();
+      return;
+    }
+    if (form.dataset.form === 'invite-password') {
+      state.loading = true; render();
+      await finishInvitation(values.password, values.confirmation);
+      return;
+    }
+    if (form.dataset.form === 'mfa') {
+      state.loading = true; render();
+      await verifyMfa(values.code);
       return;
     }
     if (form.dataset.form === 'subscription') {
@@ -683,9 +918,31 @@
       return;
     }
     if (form.dataset.form === 'admin') {
-      await api('/api/admin/administrators', { method: 'POST', body: values });
-      state.admins = (await api('/api/admin/administrators')).data || [];
-      showNotice('Administrador autorizado.');
+      const result = await api('/api/admin/administrators', { method: 'POST', body: { ...values, mfaRequired: values.mfaRequired === 'on' } });
+      await loadSection('administrators', true);
+      form.reset();
+      showNotice(result.message || 'Convite administrativo enviado.');
+      return;
+    }
+    if (form.dataset.form === 'admin-access') {
+      await api('/api/admin/administrators', { method: 'PUT', body: { ...values, mfaRequired: values.mfaRequired === 'on' } });
+      state.modal = null;
+      await loadSection('administrators', true);
+      showNotice('Acesso atualizado e registrado na auditoria.');
+      return;
+    }
+    if (form.dataset.form === 'audit-filter') {
+      Object.assign(state.filters, {
+        auditQuery: values.q || '', auditCategory: values.category || 'all', auditOutcome: values.outcome || 'all',
+        auditActor: values.actor || '', auditFrom: values.from || '', auditTo: values.to || '', auditPage: 1
+      });
+      state.logs = null;
+      state.loading = true;
+      render();
+      await loadSection('logs', true);
+      state.loading = false;
+      render();
+      return;
     }
   }));
 
@@ -694,12 +951,19 @@
     if (!target) return;
     const action = target.dataset.action;
     if (action === 'logout') return signOut();
+    if (action === 'copy-mfa-secret') {
+      await navigator.clipboard.writeText(state.mfaMode?.secret || '');
+      showNotice('Chave do autenticador copiada.');
+      return;
+    }
     if (action === 'section' || action === 'command-section') return openSection(target.dataset.section);
     if (action === 'filtered-section') { state.filters.subscriptionStatus = target.dataset.filter; return openSection(target.dataset.section); }
     if (action === 'toggle-sidebar') { state.sidebarOpen = !state.sidebarOpen; render(); return; }
     if (action === 'refresh') return loadCore();
     if (action === 'dismiss-notice') { state.notice = null; render(); return; }
     if (action === 'close-modal') { state.modal = null; render(); return; }
+    if (action === 'manage-admin') { state.modal = { type: 'admin-access', email: target.dataset.email }; render(); return; }
+    if (action === 'view-audit') { state.modal = { type: 'audit-event', id: target.dataset.id }; render(); return; }
     if (action === 'open-plan') { state.modal = { type: 'plan' }; render(); return; }
     if (action === 'edit-plan') { state.modal = { type: 'plan', id: target.dataset.id }; render(); return; }
     if (action === 'duplicate-plan') { state.modal = { type: 'plan', id: target.dataset.id, duplicate: true }; render(); return; }
@@ -755,8 +1019,29 @@
       showNotice('Chamado marcado como resolvido.');
       return;
     }
-    if (action === 'reload-health') { state.health = null; state.loading = true; render(); await loadSection('health', true); state.loading = false; render(); return; }
+    if (action === 'reload-health') {
+      state.loading = true; render();
+      state.health = await api('/api/admin/health', { method: 'POST' });
+      state.loading = false;
+      showNotice('Diagnóstico concluído e armazenado no histórico.');
+      return;
+    }
+    if (action === 'health-navigate') {
+      if (target.dataset.section === 'subscriptions' && target.dataset.filter) state.filters.subscriptionStatus = target.dataset.filter;
+      return openSection(target.dataset.section);
+    }
     if (action === 'reload-logs') { state.logs = null; state.loading = true; render(); await loadSection('logs', true); state.loading = false; render(); return; }
+    if (action === 'export-audit') { await downloadAuditCsv(); return; }
+    if (action === 'audit-page') {
+      state.filters.auditPage = Number(target.dataset.page || 1);
+      state.logs = null; state.loading = true; render();
+      await loadSection('logs', true); state.loading = false; render(); return;
+    }
+    if (action === 'clear-audit-filters') {
+      Object.assign(state.filters, { auditQuery: '', auditCategory: 'all', auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1 });
+      state.logs = null; state.loading = true; render();
+      await loadSection('logs', true); state.loading = false; render(); return;
+    }
     if (action === 'toggle-menu') {
       await api('/api/admin/tenant-menu', { method: 'PUT', body: { storeId: state.selectedStore, id: target.dataset.id, item: { is_available: target.dataset.available !== 'true' } } });
       await loadSection('catalog'); render(); showNotice('Disponibilidade atualizada.'); return;
@@ -768,8 +1053,8 @@
     }
     if (action === 'delete-admin') {
       if (!confirm(`Remover ${target.dataset.email} do Control Center?`)) return;
-      await api('/api/admin/administrators', { method: 'DELETE', body: { email: target.dataset.email } });
-      state.admins = (await api('/api/admin/administrators')).data || []; showNotice('Acesso removido.');
+      await api('/api/admin/administrators', { method: 'DELETE', body: { email: target.dataset.email, reason: 'Acesso revogado pelo painel' } });
+      await loadSection('administrators', true); showNotice('Acesso revogado e histórico preservado.');
     }
   }));
 
@@ -826,9 +1111,11 @@
 
   async function boot() {
     render();
+    if (state.inviteMode) return;
     if (!configured() || !state.token) return;
     try {
       state.user = (await api('/api/admin/session')).data;
+      if (await prepareMfa()) return;
       await loadCore();
     } catch {
       await signOut();
