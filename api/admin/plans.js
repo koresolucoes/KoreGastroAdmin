@@ -1,10 +1,35 @@
-import { assert, bodyOf, fail, requireAdmin, reply, supabase } from '../_lib/admin.js';
+import { assert, assertUuid, auditAdminAction, bodyOf, cleanText, fail, requireAdmin, reply, supabase } from '../_lib/admin.js';
 
 async function replacePermissions(planId, keys) {
-  await supabase(`/rest/v1/plan_permissions?plan_id=eq.${planId}`, { method: 'DELETE' });
+  await supabase(`/rest/v1/plan_permissions?plan_id=eq.${encodeURIComponent(planId)}`, { method: 'DELETE' });
   if (keys.length) {
     await supabase('/rest/v1/plan_permissions', { method: 'POST', body: keys.map((permission_key) => ({ plan_id: planId, permission_key })) });
   }
+}
+
+function normalizePlan(input, partial = false) {
+  const plan = input && typeof input === 'object' ? input : {};
+  const normalized = {};
+  if (!partial || plan.name !== undefined) {
+    normalized.name = cleanText(plan.name, 120);
+    assert(normalized.name.length >= 2, 'Nome do plano é obrigatório.');
+  }
+  if (!partial || plan.slug !== undefined) {
+    normalized.slug = cleanText(plan.slug, 80).toLowerCase();
+    assert(/^[a-z0-9_-]+$/.test(normalized.slug), 'Identificador do plano inválido. Use letras, números, hífen ou underscore.');
+  }
+  for (const [source, target, minimum, integer] of [
+    ['price', 'price', 0, false],
+    ['trial_period_days', 'trial_period_days', 0, true],
+    ['max_stores', 'max_stores', 1, true]
+  ]) {
+    if (partial && plan[source] === undefined) continue;
+    const value = Number(plan[source] ?? minimum);
+    assert(Number.isFinite(value) && value >= minimum && (!integer || Number.isInteger(value)), `${source} inválido.`);
+    normalized[target] = value;
+  }
+  if (!partial || plan.recurring !== undefined) normalized.recurring = plan.recurring !== false;
+  return normalized;
 }
 
 export default async function handler(req, res) {
@@ -15,21 +40,30 @@ export default async function handler(req, res) {
       const result = await supabase('/rest/v1/plans?select=*,plan_permissions(*)&order=price.asc');
       return reply(res, 200, { data: result.data || [] });
     }
-    const { id, plan, permissions = [] } = await bodyOf(req);
+    const payload = await bodyOf(req);
+    const { id, plan } = payload;
+    const permissionsProvided = Object.prototype.hasOwnProperty.call(payload, 'permissions');
+    const permissions = permissionsProvided ? payload.permissions : [];
+    assert(Array.isArray(permissions), 'permissions deve ser uma lista.');
     if (req.method === 'POST') {
-      assert(plan?.name && plan?.slug, 'Nome e identificador do plano são obrigatórios.');
-      const created = await supabase('/rest/v1/plans', { method: 'POST', headers: { Prefer: 'return=representation' }, body: plan });
-      await replacePermissions(created.data[0].id, permissions);
+      const normalizedPlan = normalizePlan(plan);
+      const created = await supabase('/rest/v1/plans', { method: 'POST', headers: { Prefer: 'return=representation' }, body: normalizedPlan });
+      await replacePermissions(created.data[0].id, [...new Set(permissions.map((key) => cleanText(key, 120)).filter(Boolean))]);
+      await auditAdminAction(context, 'ADMIN_PLAN_CREATED', { plan: created.data[0], permissionCount: permissions.length });
       return reply(res, 201, { data: created.data[0] });
     }
-    assert(id, 'id do plano é obrigatório.');
+    assertUuid(id, 'id do plano');
     if (req.method === 'PUT') {
-      if (plan) await supabase(`/rest/v1/plans?id=eq.${id}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: plan });
-      await replacePermissions(id, permissions);
+      const normalizedPlan = plan ? normalizePlan(plan, true) : null;
+      assert((normalizedPlan && Object.keys(normalizedPlan).length) || permissionsProvided, 'Nenhuma alteração válida foi informada.');
+      if (normalizedPlan && Object.keys(normalizedPlan).length) await supabase(`/rest/v1/plans?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: normalizedPlan });
+      if (permissionsProvided) await replacePermissions(id, [...new Set(permissions.map((key) => cleanText(key, 120)).filter(Boolean))]);
+      await auditAdminAction(context, 'ADMIN_PLAN_UPDATED', { planId: id, changes: normalizedPlan || {}, permissionCount: permissionsProvided ? permissions.length : null });
       return reply(res, 200, { success: true });
     }
     if (req.method === 'DELETE') {
-      await supabase(`/rest/v1/plans?id=eq.${id}`, { method: 'DELETE' });
+      await supabase(`/rest/v1/plans?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await auditAdminAction(context, 'ADMIN_PLAN_DELETED', { planId: id });
       return reply(res, 200, { success: true });
     }
     return reply(res, 405, { error: 'Método não permitido.' });

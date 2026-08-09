@@ -137,3 +137,81 @@ export function assert(condition, message) {
     throw error;
   }
 }
+
+export function queryValue(req, name, fallback = '') {
+  const value = req?.query?.[name];
+  if (Array.isArray(value)) return value[0] ?? fallback;
+  return value ?? fallback;
+}
+
+export function clampInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+export function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+export function assertUuid(value, label = 'id') {
+  assert(isUuid(value), `${label} inválido.`);
+}
+
+export function assertEnum(value, allowed, label) {
+  assert(allowed.includes(value), `${label} inválido.`);
+}
+
+export function cleanText(value, maxLength = 500) {
+  return String(value ?? '').trim().slice(0, maxLength);
+}
+
+export function validIsoDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  assert(Number.isFinite(parsed.getTime()), 'Data inválida.');
+  return parsed.toISOString();
+}
+
+export async function supabaseAll(path, options = {}) {
+  const pageSize = clampInteger(options.pageSize, 1000, 1, 1000);
+  const maxRows = clampInteger(options.maxRows, 10000, pageSize, 50000);
+  const rows = [];
+
+  while (rows.length < maxRows) {
+    const end = Math.min(rows.length + pageSize, maxRows) - 1;
+    const result = await supabase(path, {
+      headers: {
+        Range: `${rows.length}-${end}`,
+        'Range-Unit': 'items',
+        ...(options.headers || {})
+      }
+    });
+    const batch = Array.isArray(result.data) ? result.data : [];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+export async function auditAdminAction(context, action, details = {}) {
+  if (!context?.user?.id) return;
+  try {
+    await supabase('/rest/v1/system_logs', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: {
+        user_id: context.user.id,
+        action: cleanText(action, 120),
+        details: JSON.stringify({
+          actorEmail: context.user.email || null,
+          source: 'koregastro-admin',
+          ...details
+        })
+      }
+    });
+  } catch (error) {
+    console.warn('[Admin audit] Não foi possível registrar o evento.', error?.message || error);
+  }
+}

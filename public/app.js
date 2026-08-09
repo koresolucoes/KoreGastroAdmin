@@ -10,8 +10,12 @@
     loading: false,
     dashboard: null,
     tenants: [],
+    customerSummary: null,
+    customerMeta: null,
     plans: [],
     tickets: null,
+    ticketSummary: null,
+    ticketMeta: null,
     menu: [],
     selectedTenant: '',
     selectedTicketId: '',
@@ -49,6 +53,7 @@
   const apiUrl = (path) => `${String(config.apiBaseUrl || '').replace(/\/$/, '')}${path}`;
   const configured = () => Boolean(config.supabaseUrl && config.supabaseAnonKey);
   const planById = (id) => state.plans.find((plan) => String(plan.id) === String(id));
+  const subscriptionOf = (tenant) => tenant?.subscription || tenant?.subscriptions?.[0] || null;
   const initials = (value = '') => value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'C';
   const normalize = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const includes = (haystack, needle) => normalize(haystack).includes(normalize(needle));
@@ -66,11 +71,32 @@
 
   function status(value) {
     const labels = {
-      active: 'Ativa', trialing: 'Em trial', past_due: 'Inadimplente', canceled: 'Cancelada',
-      open: 'Aberto', in_progress: 'Em atendimento', resolved: 'Resolvido', unknown: 'Sem status'
+      active: 'Ativa', trialing: 'Em trial', past_due: 'Inadimplente', canceled: 'Cancelada', unpaid: 'Não paga',
+      open: 'Aberto', in_progress: 'Em atendimento', resolved: 'Resolvido', closed: 'Fechado', unknown: 'Sem status'
     };
     const safe = value || 'unknown';
     return `<span class="status status-${escape(safe)}"><i></i>${labels[safe] || escape(safe)}</span>`;
+  }
+
+  function entitlement(subscription) {
+    if (!subscription) return '<span class="health-signal neutral"><i></i>Sem assinatura</span>';
+    if (subscription.periodExpired) return '<span class="health-signal danger"><i></i>Período vencido</span>';
+    if (subscription.entitlementActive) return '<span class="health-signal success"><i></i>Acesso vigente</span>';
+    return '<span class="health-signal warning"><i></i>Acesso restrito</span>';
+  }
+
+  function onboarding(tenant) {
+    const missing = tenant?.onboarding?.missing || [];
+    if (!missing.length) return '<span class="health-signal success"><i></i>Completo</span>';
+    const labels = { store: 'loja', company_profile: 'perfil empresarial', company_data: 'dados fiscais', subscription: 'assinatura' };
+    return `<span class="health-signal warning" title="Faltando: ${escape(missing.map((item) => labels[item] || item).join(', '))}"><i></i>${missing.length} pendência(s)</span>`;
+  }
+
+  function sla(ticket) {
+    if (!ticket || ['resolved', 'closed'].includes(ticket.status)) return '<span class="sla sla-done">Concluído</span>';
+    const hours = Number(ticket.waitingHours || 0);
+    const label = hours < 1 ? 'Agora' : `${hours}h na fila`;
+    return `<span class="sla sla-${escape(ticket.slaState || 'ok')}">${label}</span>`;
   }
 
   function priority(value) {
@@ -123,7 +149,7 @@
       });
     } finally {
       sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', user: null, dashboard: null, tenants: [], plans: [], tickets: null, menu: [], admins: null, health: null, logs: null });
+      Object.assign(state, { token: '', user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], admins: null, health: null, logs: null });
       render();
     }
   }
@@ -132,14 +158,18 @@
     state.loading = true;
     render();
     try {
-      const [dashboard, tenants, plans, tickets] = await Promise.all([
-        api('/api/admin/dashboard'), api('/api/admin/restaurants'), api('/api/admin/plans'), api('/api/admin/tickets')
+      const [dashboard, customers, plans, tickets] = await Promise.all([
+        api('/api/admin/dashboard'), api('/api/admin/customers?pageSize=500'), api('/api/admin/plans'), api('/api/admin/tickets')
       ]);
       state.dashboard = dashboard.data;
-      state.tenants = tenants.data || [];
+      state.tenants = customers.data || [];
+      state.customerSummary = customers.summary || null;
+      state.customerMeta = customers.meta || null;
       state.plans = plans.data || [];
       state.tickets = tickets.data || [];
-      if (!state.selectedTenant && state.tenants[0]) state.selectedTenant = state.tenants[0].id;
+      state.ticketSummary = tickets.summary || null;
+      state.ticketMeta = tickets.meta || null;
+      if (!state.selectedTenant && state.tenants[0]) state.selectedTenant = state.tenants[0].accountId || state.tenants[0].id;
       if (!state.selectedTicketId && state.tickets[0]) state.selectedTicketId = state.tickets[0].id;
     } finally {
       state.loading = false;
@@ -148,7 +178,12 @@
   }
 
   async function loadSection(section = state.section, force = false) {
-    if (section === 'support' && (force || !state.tickets)) state.tickets = (await api('/api/admin/tickets')).data || [];
+    if (section === 'support' && (force || !state.tickets)) {
+      const tickets = await api('/api/admin/tickets');
+      state.tickets = tickets.data || [];
+      state.ticketSummary = tickets.summary || null;
+      state.ticketMeta = tickets.meta || null;
+    }
     if (section === 'catalog' && state.selectedTenant) state.menu = (await api(`/api/admin/tenant-menu?tenantId=${encodeURIComponent(state.selectedTenant)}`)).data || [];
     if (section === 'administrators' && (force || !state.admins)) state.admins = (await api('/api/admin/administrators')).data || [];
     if (section === 'health' && (force || !state.health)) state.health = await api('/api/admin/health');
@@ -222,28 +257,39 @@
     const data = state.dashboard || {};
     const subscriptions = data.subscriptions || {};
     const totalSubscriptions = Object.values(subscriptions).reduce((sum, value) => sum + Number(value || 0), 0);
-    const activeRate = totalSubscriptions ? Math.round(((subscriptions.active || 0) / totalSubscriptions) * 100) : 0;
+    const healthySubscriptions = Number(data.activeSubscriptions || 0) + Number(data.activeTrials || 0);
+    const activeRate = totalSubscriptions ? Math.round((healthySubscriptions / totalSubscriptions) * 100) : 0;
     const recent = [...state.tenants].sort((a, b) => new Date(b.created_at || b.updated_at) - new Date(a.created_at || a.updated_at)).slice(0, 5);
-    const attentionTickets = (state.tickets || []).filter((ticket) => ticket.status !== 'resolved').slice(0, 4);
+    const attentionTickets = (state.tickets || []).filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).sort((a, b) => Number(b.waitingHours || 0) - Number(a.waitingHours || 0)).slice(0, 4);
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
     const alerts = [];
     if (data.atRiskSubscriptions) alerts.push(`<button data-action="filtered-section" data-section="subscriptions" data-filter="past_due"><i class="alert-dot danger"></i><span><strong>${data.atRiskSubscriptions} assinatura(s) inadimplente(s)</strong><small>Precisam de acompanhamento financeiro</small></span><b>Ver agora →</b></button>`);
+    if (data.expiredButEnabled) alerts.push(`<button data-action="section" data-section="subscriptions"><i class="alert-dot danger"></i><span><strong>${data.expiredButEnabled} acesso(s) marcado(s) ativo(s), mas vencido(s)</strong><small>Corrija o período para evitar divergência de acesso</small></span><b>Revisar →</b></button>`);
+    if (data.waitingOver24Hours) alerts.push(`<button data-action="section" data-section="support"><i class="alert-dot warning"></i><span><strong>${data.waitingOver24Hours} chamado(s) aguardando há mais de 24h</strong><small>Fila fora do objetivo de resposta</small></span><b>Atender →</b></button>`);
     if (data.urgentTickets) alerts.push(`<button data-action="section" data-section="support"><i class="alert-dot warning"></i><span><strong>${data.urgentTickets} chamado(s) prioritário(s)</strong><small>Fila de atendimento requer atenção</small></span><b>Abrir fila →</b></button>`);
+    if (data.incompleteOnboarding) alerts.push(`<button data-action="section" data-section="tenants"><i class="alert-dot info"></i><span><strong>${data.incompleteOnboarding} cliente(s) com onboarding incompleto</strong><small>Faltam estrutura empresarial, dados fiscais ou assinatura</small></span><b>Ver clientes →</b></button>`);
     if (!alerts.length) alerts.push(`<div class="all-clear"><i>✓</i><span><strong>Operação sob controle</strong><small>Nenhuma pendência crítica identificada agora.</small></span></div>`);
 
     return `<section class="page overview-page">
-      ${pageHeader('PAINEL EXECUTIVO', `${greeting}, equipe ChefOS.`, 'Aqui está o pulso da sua operação neste momento.', `<button class="secondary" data-action="refresh">↻ Atualizar dados</button><button class="primary" data-action="open-provision">＋ Novo cliente</button>`)}
+      ${pageHeader('PAINEL EXECUTIVO', `${greeting}, equipe ChefOS.`, `Pulso operacional atualizado ${relative(data.generatedAt)}.`, `<button class="secondary" data-action="refresh">↻ Atualizar dados</button><button class="primary" data-action="open-provision">＋ Novo cliente</button>`)}
+      ${(data.dataQuality?.warnings || []).length ? `<div class="data-quality-banner"><span>i</span><div><strong>Receita contratada, ainda sem conciliação automática</strong><p>${escape(data.dataQuality.warnings[0])}</p></div><button data-action="section" data-section="subscriptions">Entender na base →</button></div>` : ''}
       <div class="metrics executive-metrics">
-        ${metric('Receita recorrente', money(data.mrr), `${money(data.arr)} de ARR estimado`, 'accent', 'R$')}
-        ${metric('Assinaturas ativas', shortNumber(data.activeSubscriptions), `${activeRate}% da base assinante`, 'success', '↗')}
-        ${metric('Clientes ChefOS', shortNumber(data.tenants), `${data.stores || 0} operações cadastradas`, '', '◫')}
-        ${metric('Chamados abertos', shortNumber(data.openTickets), `${data.inProgressTickets || 0} em atendimento`, data.urgentTickets ? 'warning' : '', '✦')}
+        ${metric('Receita mensal contratada', money(data.contractedMonthly), `${money((data.contractedMonthly || 0) * 12)} anualizado`, 'accent', 'R$')}
+        ${metric('Acessos vigentes', shortNumber(healthySubscriptions), `${activeRate}% das assinaturas cadastradas`, 'success', '↗')}
+        ${metric('Clientes ChefOS', shortNumber(data.tenants), `${data.stores || 0} operações · ${data.incompleteOnboarding || 0} incompletas`, data.incompleteOnboarding ? 'warning' : '', '◫')}
+        ${metric('Fila de suporte', shortNumber((data.openTickets || 0) + (data.inProgressTickets || 0)), `${data.waitingOver24Hours || 0} aguardando há mais de 24h`, data.waitingOver24Hours ? 'warning' : '', '✦')}
+      </div>
+      <div class="operations-radar">
+        <button data-action="filtered-section" data-section="subscriptions" data-filter="trialing"><span>TRIALS ENCERRANDO</span><strong>${data.trialsEnding7Days || 0}</strong><small>nos próximos 7 dias</small></button>
+        <button data-action="section" data-section="subscriptions"><span>ACESSOS VENCIDOS</span><strong>${data.expiredButEnabled || 0}</strong><small>com status ainda ativo</small></button>
+        <button data-action="section" data-section="support"><span>SLA &gt; 24 HORAS</span><strong>${data.waitingOver24Hours || 0}</strong><small>chamados pendentes</small></button>
+        <button data-action="section" data-section="tenants"><span>ONBOARDING INCOMPLETO</span><strong>${data.incompleteOnboarding || 0}</strong><small>clientes para revisar</small></button>
       </div>
       <div class="overview-grid">
         <section class="panel revenue-panel">
           <div class="panel-heading"><div><p class="eyebrow">ASSINATURAS</p><h2>Saúde da receita</h2></div><button class="text-button" data-action="section" data-section="subscriptions">Ver assinaturas →</button></div>
-          <div class="revenue-hero"><span><small>MRR ATUAL</small><strong>${money(data.mrr)}</strong></span><span><small>RENOVAÇÕES EM 7 DIAS</small><strong>${data.renewalsNext7Days || 0}</strong></span></div>
+          <div class="revenue-hero"><span><small>CONTRATADO / MÊS</small><strong>${money(data.contractedMonthly)}</strong></span><span><small>RENOVAÇÕES EM 7 DIAS</small><strong>${data.renewalsNext7Days || 0}</strong></span></div>
           <div class="distribution-bar" aria-label="Distribuição das assinaturas">
             ${Object.entries(subscriptions).map(([key, value]) => `<i class="segment segment-${key}" style="width:${totalSubscriptions ? (value / totalSubscriptions) * 100 : 0}%" title="${key}: ${value}"></i>`).join('')}
           </div>
@@ -253,10 +299,10 @@
       </div>
       <div class="overview-grid lower">
         <section class="panel compact-table"><div class="panel-heading"><div><p class="eyebrow">CLIENTES</p><h2>Entradas recentes</h2></div><button class="text-button" data-action="section" data-section="tenants">Ver todos →</button></div>
-          <div class="recent-list">${recent.map((tenant) => { const subscription = tenant.subscriptions?.[0] || {}; return `<button data-action="open-tenant" data-id="${tenant.id}"><span class="avatar">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span>${status(subscription.status)}<time>${relative(tenant.created_at || tenant.updated_at)}</time></button>`; }).join('') || '<p class="empty">Nenhum cliente cadastrado.</p>'}</div>
+          <div class="recent-list">${recent.map((tenant) => { const subscription = subscriptionOf(tenant); return `<button data-action="open-tenant" data-id="${tenant.accountId || tenant.id}"><span class="avatar">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span>${subscription ? status(subscription.status) : status('unknown')}<time>${relative(tenant.created_at || tenant.updated_at)}</time></button>`; }).join('') || '<p class="empty">Nenhum cliente cadastrado.</p>'}</div>
         </section>
         <section class="panel support-snapshot"><div class="panel-heading"><div><p class="eyebrow">SUPORTE</p><h2>Fila prioritária</h2></div><button class="text-button" data-action="section" data-section="support">Central de suporte →</button></div>
-          <div class="snapshot-list">${attentionTickets.map((ticket) => `<button data-action="open-ticket" data-id="${ticket.id}"><span>${priority(ticket.priority)}<strong>${escape(ticket.subject || 'Sem assunto')}</strong><small>${escape(ticket.client_name)} · ${relative(ticket.updated_at || ticket.created_at)}</small></span>${status(ticket.status)}</button>`).join('') || '<div class="all-clear compact"><i>✓</i><span><strong>Caixa de entrada vazia</strong><small>Nenhum chamado pendente.</small></span></div>'}</div>
+          <div class="snapshot-list">${attentionTickets.map((ticket) => `<button data-action="open-ticket" data-id="${ticket.id}"><span>${priority(ticket.priority)}<strong>${escape(ticket.subject || 'Sem assunto')}</strong><small>${escape(ticket.client_name)} · ${relative(ticket.updated_at || ticket.created_at)}</small></span><span class="snapshot-status">${sla(ticket)}${status(ticket.status)}</span></button>`).join('') || '<div class="all-clear compact"><i>✓</i><span><strong>Caixa de entrada vazia</strong><small>Nenhum chamado pendente.</small></span></div>'}</div>
         </section>
       </div>
     </section>`;
@@ -265,17 +311,19 @@
   function subscriptions() {
     const query = state.filters.subscription;
     const filter = state.filters.subscriptionStatus;
-    const rows = state.tenants.map((tenant) => ({ tenant, subscription: tenant.subscriptions?.[0] || {} }))
+    const rows = state.tenants.map((tenant) => ({ tenant, subscription: subscriptionOf(tenant) || {} }))
       .filter(({ tenant, subscription }) => (!query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query)) && (filter === 'all' || subscription.status === filter));
-    const totalMrr = rows.filter(({ subscription }) => subscription.status === 'active').reduce((sum, { subscription }) => sum + Number(planById(subscription.plan_id)?.price || 0), 0);
-    const dueSoon = rows.filter(({ subscription }) => { const diff = new Date(subscription.current_period_end).getTime() - Date.now(); return diff >= 0 && diff <= 7 * 86400000; }).length;
-    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">↓ Exportar CSV</button><button class="primary" data-action="open-provision">＋ Nova assinatura</button>`;
+    const contractedMonthly = rows.filter(({ subscription }) => subscription.status === 'active' && subscription.entitlementActive).reduce((sum, { subscription }) => sum + Number(planById(subscription.plan_id)?.price || 0), 0);
+    const dueSoon = rows.filter(({ subscription }) => { const diff = new Date(subscription.current_period_end).getTime() - Date.now(); return subscription.entitlementActive && diff >= 0 && diff <= 7 * 86400000; }).length;
+    const expired = rows.filter(({ subscription }) => subscription.periodExpired && ['active', 'trialing'].includes(subscription.status)).length;
+    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">↓ Exportar CSV</button><button class="primary" data-action="open-provision">＋ Provisionar cliente</button>`;
     return `<section class="page">
       ${pageHeader('RECEITA E ACESSO', 'Assinaturas', 'Controle planos, vencimentos e o acesso de cada operação ChefOS.', actions)}
-      <div class="summary-strip"><div><span>MRR nesta visão</span><strong>${money(totalMrr)}</strong></div><div><span>Assinaturas exibidas</span><strong>${rows.length}</strong></div><div><span>Renovam em 7 dias</span><strong>${dueSoon}</strong></div><div class="danger-text"><span>Inadimplentes</span><strong>${rows.filter(({ subscription }) => subscription.status === 'past_due').length}</strong></div></div>
-      <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
-      <div class="panel table-wrap"><table><thead><tr><th>Cliente / operação</th><th>Plano</th><th>Status</th><th>Valor mensal</th><th>Próxima renovação</th><th></th></tr></thead><tbody>
-        ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${tenant.id}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td><strong>${money(plan?.price)}</strong><small>por mês</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td><button class="row-action" data-action="edit-subscription" data-id="${tenant.id}">Gerenciar</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
+      <div class="integration-warning"><span>!</span><div><strong>Alterações de acesso são internas</strong><p>O conector de recorrência do Mercado Pago ainda não está habilitado; mudanças aqui não cancelam nem alteram cobranças no provedor.</p></div></div>
+      <div class="summary-strip"><div><span>Receita contratada nesta visão</span><strong>${money(contractedMonthly)}</strong></div><div><span>Assinaturas exibidas</span><strong>${rows.length}</strong></div><div><span>Vencem em 7 dias</span><strong>${dueSoon}</strong></div><div class="danger-text"><span>Ativas com período vencido</span><strong>${expired}</strong></div></div>
+      <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="unpaid" ${filter === 'unpaid' ? 'selected' : ''}>Não pagas</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
+      <div class="panel table-wrap"><table><thead><tr><th>Cliente / operação</th><th>Plano</th><th>Status</th><th>Saúde do acesso</th><th>Valor mensal</th><th>Período atual</th><th></th></tr></thead><tbody>
+        ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td>${entitlement(subscription)}</td><td><strong>${money(plan?.price)}</strong><small>valor do plano</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td><button class="row-action" data-action="edit-subscription" data-id="${accountId}">Gerenciar</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
       </tbody></table></div>
     </section>`;
   }
@@ -283,13 +331,16 @@
   function tenants() {
     const query = state.filters.customer;
     const rows = state.tenants.filter((tenant) => !query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query));
+    const summary = state.customerSummary || {};
     const actions = `<button class="secondary" data-action="export" data-kind="customers">↓ Exportar CSV</button><button class="primary" data-action="open-provision">＋ Novo cliente</button>`;
     return `<section class="page">
-      ${pageHeader('BASE DE CLIENTES', 'Clientes e operações', 'Uma visão única de proprietários, lojas, atividade e acesso.', actions)}
+      ${pageHeader('BASE DE CLIENTES', 'Clientes e operações', 'Visão 360º de identidade, onboarding, lojas, assinatura e suporte.', actions)}
+      <div class="summary-strip customer-summary"><div><span>Clientes</span><strong>${summary.total ?? state.tenants.length}</strong></div><div><span>Operações</span><strong>${summary.stores || 0}</strong></div><div class="warning-text"><span>Onboarding incompleto</span><strong>${summary.incompleteOnboarding || 0}</strong></div><div class="danger-text"><span>Sem assinatura</span><strong>${summary.withoutSubscription || 0}</strong></div><div><span>Chamados abertos</span><strong>${summary.openTickets || 0}</strong></div></div>
       <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="customer" value="${escape(query)}" placeholder="Buscar por nome, e-mail ou loja" /></div><span class="result-count">${rows.length} cliente(s)</span></div>
-      <div class="panel table-wrap"><table><thead><tr><th>Cliente</th><th>Operações</th><th>Assinatura</th><th>Última atividade</th><th>Desde</th><th></th></tr></thead><tbody>
-        ${rows.map((tenant) => { const subscription = tenant.subscriptions?.[0] || {}; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${tenant.id}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.email)}</small></span></button></td><td><strong>${tenant.stores?.length || 0} operação(ões)</strong><small>${escape(tenant.stores?.map((store) => store.name).join(', ') || 'Nenhuma loja')}</small></td><td>${status(subscription.status)}</td><td><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong><small>${date(tenant.last_sign_in_at || tenant.updated_at)}</small></td><td>${day(tenant.created_at)}</td><td><button class="row-action" data-action="open-tenant" data-id="${tenant.id}">Ver cliente</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">Nenhum cliente encontrado.</td></tr>'}
+      <div class="panel table-wrap"><table><thead><tr><th>Cliente</th><th>Operações</th><th>Onboarding</th><th>Assinatura</th><th>Suporte</th><th>Última atividade</th><th></th></tr></thead><tbody>
+        ${rows.map((tenant) => { const subscription = subscriptionOf(tenant); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.email)}</small></span></button></td><td><strong>${tenant.stores?.length || 0} operação(ões)</strong><small>${escape(tenant.stores?.map((store) => store.name).join(', ') || 'Nenhuma loja')}</small></td><td>${onboarding(tenant)}</td><td>${subscription ? status(subscription.status) : status('unknown')}<small>${subscription ? escape(planById(subscription.plan_id)?.name || 'Plano não identificado') : 'Requer configuração'}</small></td><td><strong>${tenant.support?.openTickets || 0} aberto(s)</strong><small>${tenant.support?.urgentTickets || 0} prioritário(s)</small></td><td><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong><small>${date(tenant.last_sign_in_at || tenant.updated_at)}</small></td><td><button class="row-action" data-action="open-tenant" data-id="${accountId}">Visão 360º</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhum cliente encontrado.</td></tr>'}
       </tbody></table></div>
+      ${state.customerMeta ? `<p class="dataset-meta">Exibindo ${state.customerMeta.returned || rows.length} de ${state.customerMeta.total || rows.length} contas retornadas pela API administrativa.</p>` : ''}
     </section>`;
   }
 
@@ -298,7 +349,9 @@
     const filter = state.filters.ticketStatus;
     return (state.tickets || []).filter((ticket) => {
       const matchesQuery = !query || includes(`${ticket.subject} ${ticket.client_name} ${ticket.store_name}`, query);
-      const matchesStatus = filter === 'all' || (filter === 'active' ? ticket.status !== 'resolved' : ticket.status === filter);
+      const matchesStatus = filter === 'all'
+        || (filter === 'active' ? !['resolved', 'closed'].includes(ticket.status) : false)
+        || (filter === 'completed' ? ['resolved', 'closed'].includes(ticket.status) : ticket.status === filter);
       return matchesQuery && matchesStatus;
     });
   }
@@ -308,17 +361,19 @@
     if (tickets.length && !tickets.some((ticket) => String(ticket.id) === String(state.selectedTicketId))) state.selectedTicketId = tickets[0].id;
     const selected = (state.tickets || []).find((ticket) => String(ticket.id) === String(state.selectedTicketId));
     const messages = selected?.messages || [];
+    const summary = state.ticketSummary || {};
     return `<section class="page support-page">
       ${pageHeader('ATENDIMENTO AO CLIENTE', 'Central de suporte', 'Priorize, responda e acompanhe cada conversa até a resolução.', `<button class="secondary" data-action="reload-tickets">↻ Atualizar fila</button>`)}
+      <div class="support-kpis"><div><span>FILA ATIVA</span><strong>${summary.active || 0}</strong><small>chamados para atender</small></div><div><span>PRIORIDADE ALTA</span><strong>${summary.priority || 0}</strong><small>altos e urgentes</small></div><div class="${summary.waitingOver24Hours ? 'danger-text' : ''}"><span>SLA &gt; 24H</span><strong>${summary.waitingOver24Hours || 0}</strong><small>sem atualização</small></div><div><span>TOTAL NA BASE</span><strong>${summary.total || 0}</strong><small>até ${state.ticketMeta?.limit || 250} mais recentes</small></div></div>
       <div class="support-workspace panel">
         <aside class="ticket-queue">
-          <div class="queue-head"><div><h2>Caixa de entrada</h2><span>${tickets.filter((ticket) => ticket.status !== 'resolved').length} pendente(s)</span></div><div class="search-field compact"><span>⌕</span><input data-search="ticket" value="${escape(state.filters.ticket)}" placeholder="Buscar chamado" /></div><div class="filter-tabs"><button class="${state.filters.ticketStatus === 'active' ? 'active' : ''}" data-action="ticket-filter" data-value="active">Ativos</button><button class="${state.filters.ticketStatus === 'open' ? 'active' : ''}" data-action="ticket-filter" data-value="open">Novos</button><button class="${state.filters.ticketStatus === 'resolved' ? 'active' : ''}" data-action="ticket-filter" data-value="resolved">Resolvidos</button><button class="${state.filters.ticketStatus === 'all' ? 'active' : ''}" data-action="ticket-filter" data-value="all">Todos</button></div></div>
-          <div class="queue-list">${tickets.map((ticket) => `<button class="queue-item ${String(ticket.id) === String(state.selectedTicketId) ? 'active' : ''}" data-action="select-ticket" data-id="${ticket.id}"><div><span class="avatar small">${initials(ticket.client_name)}</span><strong>${escape(ticket.client_name)}</strong><time>${relative(ticket.updated_at || ticket.created_at)}</time></div><h3>${escape(ticket.subject || 'Sem assunto')}</h3><p>${escape(ticket.messages?.at(-1)?.text || ticket.store_name || 'Aguardando primeira mensagem')}</p><footer>${priority(ticket.priority)}${status(ticket.status)}</footer></button>`).join('') || '<p class="empty">Nenhum chamado nesta fila.</p>'}</div>
+          <div class="queue-head"><div><h2>Caixa de entrada</h2><span>${tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).length} pendente(s)</span></div><div class="search-field compact"><span>⌕</span><input data-search="ticket" value="${escape(state.filters.ticket)}" placeholder="Buscar chamado" /></div><div class="filter-tabs"><button class="${state.filters.ticketStatus === 'active' ? 'active' : ''}" data-action="ticket-filter" data-value="active">Ativos</button><button class="${state.filters.ticketStatus === 'open' ? 'active' : ''}" data-action="ticket-filter" data-value="open">Novos</button><button class="${state.filters.ticketStatus === 'completed' ? 'active' : ''}" data-action="ticket-filter" data-value="completed">Finalizados</button><button class="${state.filters.ticketStatus === 'all' ? 'active' : ''}" data-action="ticket-filter" data-value="all">Todos</button></div></div>
+          <div class="queue-list">${tickets.map((ticket) => `<button class="queue-item ${String(ticket.id) === String(state.selectedTicketId) ? 'active' : ''}" data-action="select-ticket" data-id="${ticket.id}"><div><span class="avatar small">${initials(ticket.client_name)}</span><strong>${escape(ticket.client_name)}</strong><time>${relative(ticket.updated_at || ticket.created_at)}</time></div><h3>${escape(ticket.subject || 'Sem assunto')}</h3><p>${escape(ticket.messages?.at(-1)?.text || ticket.store_name || 'Aguardando primeira mensagem')}</p><footer>${priority(ticket.priority)}${sla(ticket)}</footer></button>`).join('') || '<p class="empty">Nenhum chamado nesta fila.</p>'}</div>
         </aside>
-        <section class="conversation">${selected ? `<header class="conversation-head"><div><span class="avatar">${initials(selected.client_name)}</span><span><h2>${escape(selected.subject || 'Sem assunto')}</h2><p>${escape(selected.client_name)} · ${escape(selected.store_name || 'Geral')}</p></span></div><div>${priority(selected.priority)}${status(selected.status)}${selected.status !== 'resolved' ? `<button class="secondary small-button" data-action="resolve-ticket" data-id="${selected.id}">✓ Resolver</button>` : ''}</div></header>
-          <div class="conversation-meta"><span><small>CRIADO</small><strong>${date(selected.created_at)}</strong></span><span><small>ÚLTIMA ATUALIZAÇÃO</small><strong>${relative(selected.updated_at || selected.created_at)}</strong></span><span><small>MENSAGENS</small><strong>${messages.length}</strong></span></div>
+        <section class="conversation">${selected ? `<header class="conversation-head"><div><span class="avatar">${initials(selected.client_name)}</span><span><h2>${escape(selected.subject || 'Sem assunto')}</h2><p>${escape(selected.client_name)} · ${escape(selected.store_name || 'Geral')}</p></span></div><div>${priority(selected.priority)}${status(selected.status)}${!['resolved', 'closed'].includes(selected.status) ? `<button class="secondary small-button" data-action="resolve-ticket" data-id="${selected.id}">✓ Resolver</button>` : ''}</div></header>
+          <div class="conversation-meta"><span><small>CRIADO</small><strong>${date(selected.created_at)}</strong></span><span><small>ÚLTIMA ATUALIZAÇÃO</small><strong>${relative(selected.updated_at || selected.created_at)}</strong></span><span><small>TEMPO NA FILA</small><strong>${sla(selected)}</strong></span><span><small>MENSAGENS</small><strong>${selected.messageCount ?? messages.length}</strong></span></div>
           <div class="messages">${messages.map((message) => `<article class="message ${message.sender_type === 'admin' ? 'mine' : ''}"><span class="message-avatar">${message.sender_type === 'admin' ? 'C' : initials(selected.client_name)}</span><div><header><strong>${message.sender_type === 'admin' ? 'Equipe ChefOS' : escape(selected.client_name)}</strong><time>${date(message.created_at)}</time></header><p>${escape(message.text)}</p></div></article>`).join('') || '<div class="empty-conversation"><i>✦</i><strong>Conversa ainda vazia</strong><small>Envie a primeira resposta para iniciar o atendimento.</small></div>'}</div>
-          <form data-form="reply" data-ticket="${selected.id}" class="composer"><textarea name="text" required placeholder="Escreva uma resposta para ${escape(selected.client_name)}..."></textarea><footer><label>Atualizar como <select name="status"><option value="in_progress">Em atendimento</option><option value="resolved">Resolvido</option><option value="open">Aberto</option></select></label><button class="primary" type="submit">Enviar resposta →</button></footer></form>` : '<div class="empty-conversation full"><i>✦</i><strong>Selecione um chamado</strong><small>A conversa completa aparecerá aqui.</small></div>'}</section>
+          <form data-form="reply" data-ticket="${selected.id}" class="composer"><textarea name="text" required maxlength="10000" placeholder="Escreva uma resposta para ${escape(selected.client_name)}..."></textarea><div class="composer-hint">Ctrl + Enter para enviar · a resposta fica registrada na auditoria</div><footer><label>Atualizar como <select name="status"><option value="in_progress">Em atendimento</option><option value="resolved">Resolvido</option><option value="open">Aberto</option></select></label><button class="primary" type="submit">Enviar resposta →</button></footer></form>` : '<div class="empty-conversation full"><i>✦</i><strong>Selecione um chamado</strong><small>A conversa completa aparecerá aqui.</small></div>'}</section>
       </div>
     </section>`;
   }
@@ -344,8 +399,8 @@
 
   function provision() {
     return `<section class="page onboarding-page">${pageHeader('NOVO CLIENTE', 'Onboarding ChefOS', 'Crie a estrutura inicial completa para uma nova operação.', '')}
-      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Identificação</strong><small>Usuário e operação</small></span><span><i>2</i><strong>Plano e acesso</strong><small>Trial e permissões</small></span><span><i>3</i><strong>Estrutura inicial</strong><small>Salão e mesas</small></span><div class="onboarding-note"><strong>Provisionamento completo</strong><p>Ao concluir, o ChefOS cria loja, perfil, assinatura de trial, salão, mesas e a chave de integração.</p></div></aside>
-        <form class="panel onboarding-form" data-form="provision"><div class="form-section"><span class="section-number">01</span><div><h2>Cliente e operação</h2><p class="muted">Use o UUID já criado no Supabase Auth.</p></div></div><div class="form-grid"><label>ID do usuário<input name="userId" required placeholder="UUID do usuário no Supabase Auth" /></label><label>Nome da operação<input name="storeName" required placeholder="Ex.: Bistrô Central" /></label><label>CNPJ<input name="cnpj" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" placeholder="(00) 00000-0000" /></label><label class="wide">Endereço<input name="address" placeholder="Rua, número, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Plano inicial</h2><p class="muted">A assinatura será iniciada com 30 dias de trial.</p></div></div><label>Plano ChefOS<select name="planId"><option value="">Selecionar automaticamente o plano de entrada</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} — ${money(plan.price)}/mês</option>`).join('')}</select></label><footer><span><i>✓</i> A estrutura padrão será criada automaticamente</span><button class="primary" type="submit">Criar cliente e iniciar trial →</button></footer></form>
+      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Identidade</strong><small>Conta existente no Auth</small></span><span><i>2</i><strong>Plano e acesso</strong><small>Trial conforme o plano</small></span><span><i>3</i><strong>Estrutura inicial</strong><small>Loja, salão e mesas</small></span><div class="onboarding-note"><strong>Fluxo seguro para reenvio</strong><p>A API reaproveita loja e assinatura existentes. Se uma etapa falhar, corrija a causa e envie novamente sem duplicar a estrutura principal.</p></div></aside>
+        <form class="panel onboarding-form" data-form="provision"><div class="integration-warning compact-warning"><span>i</span><div><strong>A conta precisa existir primeiro</strong><p>Crie ou convide o proprietário no Supabase Auth e cole abaixo o UUID da conta — não o ID da loja.</p></div></div><div class="form-section"><span class="section-number">01</span><div><h2>Cliente e operação</h2><p class="muted">A API valida a identidade antes de criar qualquer dado.</p></div></div><div class="form-grid"><label>ID da conta (UUID)<input name="accountId" required minlength="36" maxlength="36" placeholder="00000000-0000-0000-0000-000000000000" /></label><label>Nome da operação<input name="storeName" required maxlength="180" placeholder="Ex.: Bistrô Central" /></label><label>CNPJ<input name="cnpj" maxlength="30" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" maxlength="40" placeholder="(00) 00000-0000" /></label><label class="wide">Endereço<input name="address" maxlength="300" placeholder="Rua, número, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Plano inicial</h2><p class="muted">O período de trial segue a configuração real do plano selecionado.</p></div></div><label>Plano ChefOS<select name="planId"><option value="">Selecionar automaticamente o plano de entrada</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} — ${money(plan.price)}/mês · ${plan.trial_period_days || 0} dias de trial</option>`).join('')}</select></label><footer><span><i>✓</i> Loja, perfil, acesso, salão, 6 mesas e chave UUID via API</span><button class="primary" type="submit">Provisionar estrutura →</button></footer></form>
       </div></section>`;
   }
 
@@ -378,14 +433,17 @@
   }
 
   function subscriptionModal(tenant) {
-    const subscription = tenant.subscriptions?.[0] || {};
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GESTÃO DE ACESSO</p><h2 id="modal-title">Assinatura de ${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="userId" value="${tenant.id}"/><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} — ${money(plan.price)}/mês</option>`).join('')}</select></label><label>Próxima renovação<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" /></label><div class="modal-summary"><span><small>OPERAÇÕES</small><strong>${tenant.stores?.length || 0}</strong></span><span><small>VALOR ATUAL</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar alterações</button></footer></form></div>`;
+    const subscription = subscriptionOf(tenant) || {};
+    const accountId = tenant.accountId || tenant.id;
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GESTÃO DE ACESSO</p><h2 id="modal-title">Assinatura de ${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="accountId" value="${accountId}"/><div class="modal-alert"><strong>Atenção à cobrança</strong><p>Esta ação altera o acesso interno. A recorrência do Mercado Pago ainda precisa ser gerenciada separadamente.</p></div><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em trial</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="unpaid" ${subscription.status === 'unpaid' ? 'selected' : ''}>Não paga</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} — ${money(plan.price)}/mês</option>`).join('')}</select></label><label>Fim do período atual<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" ${subscription.id ? '' : 'required'} /></label><label>Motivo da alteração<textarea name="reason" required minlength="5" maxlength="500" placeholder="Ex.: pagamento confirmado manualmente pelo financeiro"></textarea></label><div class="modal-summary"><span><small>SAÚDE DO ACESSO</small><strong>${entitlement(subscription)}</strong></span><span><small>VALOR DO PLANO</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar com auditoria</button></footer></form></div>`;
   }
 
   function tenantModal(tenant) {
-    const subscription = tenant.subscriptions?.[0] || {};
+    const subscription = subscriptionOf(tenant) || {};
     const plan = planById(subscription.plan_id);
-    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="drawer-title"><p class="eyebrow">CLIENTE CHEFOS</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p>${status(subscription.status)}</div><div class="detail-grid"><span><small>PLANO</small><strong>${escape(plan?.name || 'Sem plano')}</strong></span><span><small>VALOR MENSAL</small><strong>${money(plan?.price)}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>ÚLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span></div><section><div class="panel-heading"><h3>Operações</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>◫</span><span><strong>${escape(store.name)}</strong><small>Criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma operação vinculada.</p>'}</div></section><footer><button class="secondary" data-action="edit-subscription" data-id="${tenant.id}">Gerenciar assinatura</button><button class="primary" data-action="tenant-catalog" data-id="${tenant.id}">Ver cardápio</button></footer></aside></div>`;
+    const accountId = tenant.accountId || tenant.id;
+    const missingLabels = { store: 'Criar loja principal', company_profile: 'Completar perfil da empresa', company_data: 'Completar dados fiscais da empresa', subscription: 'Configurar assinatura' };
+    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="drawer-title"><p class="eyebrow">VISÃO 360º DO CLIENTE</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p><div class="drawer-signals">${subscription ? status(subscription.status) : status('unknown')}${entitlement(subscription)}${onboarding(tenant)}</div></div><div class="detail-grid"><span><small>PLANO</small><strong>${escape(plan?.name || 'Sem plano')}</strong></span><span><small>VALOR CONTRATADO</small><strong>${money(plan?.price)}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>ÚLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span><span><small>CHAMADOS ABERTOS</small><strong>${tenant.support?.openTickets || 0}</strong></span><span><small>PRIORITÁRIOS</small><strong>${tenant.support?.urgentTickets || 0}</strong></span></div>${tenant.onboarding?.missing?.length ? `<section class="drawer-checklist"><div class="panel-heading"><h3>Próximas ações</h3><span class="count-badge">${tenant.onboarding.missing.length}</span></div>${tenant.onboarding.missing.map((item) => `<div><i>!</i><span><strong>${escape(missingLabels[item] || item)}</strong><small>Necessário para concluir o onboarding</small></span></div>`).join('')}</section>` : '<div class="drawer-all-clear"><i>✓</i><span><strong>Onboarding completo</strong><small>Estrutura mínima pronta para operar.</small></span></div>'}<section><div class="panel-heading"><h3>Operações</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>◫</span><span><strong>${escape(store.name)}</strong><small>ID ${escape(String(store.storeId || store.id).slice(0, 8))} · criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma operação vinculada.</p>'}</div></section><footer><button class="secondary" data-action="edit-subscription" data-id="${accountId}">Gerenciar assinatura</button><button class="primary" data-action="tenant-catalog" data-id="${accountId}">Ver cardápio</button></footer></aside></div>`;
   }
 
   function planModal() {
@@ -463,10 +521,10 @@
     }
     if (form.dataset.form === 'subscription') {
       const currentPeriodEnd = values.currentPeriodEnd ? new Date(`${values.currentPeriodEnd}T23:59:59`).toISOString() : undefined;
-      await api('/api/admin/subscriptions', { method: 'POST', body: { userId: values.userId, status: values.status, planId: values.planId, currentPeriodEnd } });
+      const result = await api('/api/admin/subscriptions', { method: 'POST', body: { accountId: values.accountId, status: values.status, planId: values.planId, currentPeriodEnd, reason: values.reason } });
       state.modal = null;
       await loadCore();
-      showNotice('Assinatura atualizada com sucesso.');
+      showNotice(result.warning || 'Assinatura atualizada e registrada na auditoria.');
       return;
     }
     if (form.dataset.form === 'plan') {
@@ -478,7 +536,10 @@
     }
     if (form.dataset.form === 'reply') {
       await api('/api/admin/messages', { method: 'POST', body: { ticket_id: form.dataset.ticket, text: values.text, status_update: values.status } });
-      state.tickets = (await api('/api/admin/tickets')).data || [];
+      const tickets = await api('/api/admin/tickets');
+      state.tickets = tickets.data || [];
+      state.ticketSummary = tickets.summary || null;
+      state.ticketMeta = tickets.meta || null;
       showNotice('Resposta enviada ao cliente.');
       return;
     }
@@ -486,7 +547,7 @@
       state.loading = true; render();
       const result = await api('/api/admin/provision-tenant', { method: 'POST', body: values });
       await loadCore();
-      showNotice(`Cliente criado. Chave de integração: ${result.tenant.apiKey}`);
+      showNotice(`${result.idempotent ? 'Estrutura existente validada' : 'Cliente provisionado'}. Chave de integração: ${result.tenant.apiKey}`);
       return;
     }
     if (form.dataset.form === 'admin') {
@@ -519,7 +580,10 @@
     if (action === 'reload-tickets') { state.loading = true; render(); await loadSection('support', true); state.loading = false; render(); return; }
     if (action === 'resolve-ticket') {
       await api('/api/admin/tickets', { method: 'PUT', body: { id: target.dataset.id, updates: { status: 'resolved' } } });
-      state.tickets = (await api('/api/admin/tickets')).data || [];
+      const tickets = await api('/api/admin/tickets');
+      state.tickets = tickets.data || [];
+      state.ticketSummary = tickets.summary || null;
+      state.ticketMeta = tickets.meta || null;
       showNotice('Chamado marcado como resolvido.');
       return;
     }
@@ -571,6 +635,13 @@
       state.sidebarOpen = false;
       state.globalQuery = '';
       render();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      const form = event.target.closest('form[data-form="reply"]');
+      if (form) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
     }
   });
 

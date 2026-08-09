@@ -4,10 +4,10 @@ Aplicação independente para operar o painel administrativo do ChefOS. Ela reut
 
 ## Centro de controle
 
-- painel executivo com MRR, ARR, renovações, inadimplência e alertas operacionais;
-- gestão de assinaturas com filtros, troca de plano, status e vencimento;
-- central de suporte com fila, prioridade, histórico de conversa e resolução;
-- visão detalhada de clientes, lojas, atividade e cardápios;
+- painel executivo com receita mensal contratada, acessos vencidos, trials, onboarding e alertas operacionais;
+- gestão de assinaturas com saúde do acesso, troca de plano, status, vencimento, motivo e auditoria;
+- central de suporte com fila, prioridade, relógio de SLA, histórico de conversa e resolução;
+- visão 360º de clientes, lojas, assinatura, onboarding, atividade, suporte e cardápios;
 - exportação CSV de clientes e assinaturas;
 - onboarding guiado, catálogo de planos, saúde, auditoria e acessos administrativos.
 
@@ -15,8 +15,8 @@ Aplicação independente para operar o painel administrativo do ChefOS. Ela reut
 
 | Painel original | Nova rota | Operações |
 | --- | --- | --- |
-| `/admin/dashboard` | `/` | indicadores SaaS, MRR e assinaturas |
-| usuários e lojas | `/api/admin/restaurants` | consulta clientes, lojas e assinaturas |
+| `/admin/dashboard` | `/` | indicadores SaaS, receita contratada, acesso e suporte |
+| usuários e lojas | `/api/admin/customers` | consulta paginada de clientes, lojas, assinaturas, onboarding e suporte |
 | planos | `/api/admin/plans` | listar, criar, atualizar permissões e excluir |
 | suporte | `/api/admin/tickets` e `/api/admin/messages` | chamados e respostas |
 | inspector de cardápio | `/api/admin/tenant-menu` | listar, criar e atualizar itens por tenant |
@@ -25,6 +25,15 @@ Aplicação independente para operar o painel administrativo do ChefOS. Ela reut
 | health e logs | `/api/admin/health` e `/api/admin/logs` | observabilidade administrativa |
 
 As rotas legadas continuam disponíveis por compatibilidade: `/api/v2/admin/*` aponta para as novas rotas e `/api/v2/health` aponta para `/api/admin/health`.
+`/api/admin/restaurants` continua funcionando como alias temporário de `/api/admin/customers`.
+
+## Contratos administrativos
+
+- A conta (`accountId`) é sempre o UUID do usuário proprietário no Supabase Auth.
+- A loja usa seu próprio `storeId`; os dois IDs não são misturados nas respostas novas.
+- Receita é exibida como **estimativa contratada** pelo preço atual do plano. Ela só deve ser chamada de MRR depois da conciliação com o provedor de pagamentos.
+- Alterações de assinatura exigem motivo e são gravadas em `system_logs` com estado anterior e posterior.
+- Alterações internas de status, plano ou vencimento ainda não sincronizam a recorrência do Mercado Pago; o painel exibe esse aviso antes de salvar.
 
 ## Segurança aplicada na separação
 
@@ -32,6 +41,8 @@ As rotas legadas continuam disponíveis por compatibilidade: `/api/v2/admin/*` a
 - A chave `SUPABASE_SERVICE_ROLE_KEY` fica exclusivamente nas funções Vercel.
 - Todas as rotas administrativas validam o JWT e confirmam o e-mail na tabela `system_admins`.
 - `provision-tenant`, que no projeto original não validava um administrador, agora exige essa validação.
+- Entradas administrativas são validadas por UUID, enum e tamanho antes de acessar o banco.
+- O build executa verificação de sintaxe em todas as funções e bloqueia arquivos truncados antes do deploy.
 - Administradores definidos em `ROOT_ADMIN_EMAILS` não podem ser removidos pela interface.
 - O CORS é fechado por padrão; preencha `ADMIN_ALLOWED_ORIGINS` apenas se o frontend e a API estiverem em domínios diferentes.
 
@@ -40,7 +51,7 @@ As rotas legadas continuam disponíveis por compatibilidade: `/api/v2/admin/*` a
 1. Crie um repositório novo com esta pasta e importe-o na Vercel.
 2. Em **Environment Variables**, configure todas as chaves de `.env.example`.
 3. Use o mesmo projeto Supabase do KoreGastro até que uma migração de dados seja planejada.
-4. Faça o primeiro deploy. A Vercel executa `npm run build`, que injeta no navegador apenas as duas variáveis públicas `VITE_*`.
+4. Faça o primeiro deploy. A Vercel executa `npm run build`, que injeta no navegador apenas as variáveis públicas `VITE_*`.
 5. Cadastre pelo menos um e-mail em `system_admins` (e, preferencialmente, em `ROOT_ADMIN_EMAILS`) antes de acessar o portal.
 
 Para desenvolvimento local, copie `.env.example` para `.env.local`, preencha as variáveis e execute `npm run dev`.
@@ -49,4 +60,4 @@ Para desenvolvimento local, copie `.env.example` para `.env.local`, preencha as 
 
 Esta extração preserva os nomes de tabela já usados no KoreGastro: `system_admins`, `profiles`, `stores`, `subscriptions`, `plans`, `plan_permissions`, `support_tickets`, `support_ticket_messages`, `recipes`, `categories`, `company_profile`, `halls`, `tables`, `unit_permissions` e `system_logs`.
 
-Se uma tabela opcional de suporte ou logs não existir, o painel a apresenta vazia. Antes de habilitar provisionamento, confirme que as tabelas de loja e permissões têm as constraints de `upsert` esperadas (`user_id` e `manager_id,store_id`).
+Se uma tabela opcional de suporte não existir, o painel a apresenta vazia. O provisionamento atual é idempotente e pode ser reenviado depois de uma falha, mas ainda não é uma transação única; uma RPC transacional pode ser adicionada na etapa de migração do banco.
