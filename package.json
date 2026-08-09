@@ -1,0 +1,16 @@
+{
+  "name": "koregastro-admin-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Painel administrativo independente do KoreGastro, preparado para Vercel.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs && node scripts/verify.mjs",
+    "check": "node scripts/build.mjs && node scripts/verify.mjs",
+    "dev": "npx vercel dev"
+  }
+}
+

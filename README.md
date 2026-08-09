@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.9 seconds
-Output:
 # KoreGastro Admin Portal
 
 Aplicação independente para operar o painel administrativo do KoreGastro. Ela reutiliza o mesmo projeto Supabase do sistema atual, mas separa o frontend e as operações administrativas em um novo deploy Vercel.
@@ -44,4 +41,3 @@ Para desenvolvimento local, copie `.env.example` para `.env.local`, preencha as 
 Esta extração preserva os nomes de tabela já usados no KoreGastro: `system_admins`, `profiles`, `stores`, `subscriptions`, `plans`, `plan_permissions`, `support_tickets`, `support_ticket_messages`, `recipes`, `categories`, `company_profile`, `halls`, `tables`, `unit_permissions` e `system_logs`.
 
 Se uma tabela opcional de suporte ou logs não existir, o painel a apresenta vazia. Antes de habilitar provisionamento, confirme que as tabelas de loja e permissões têm as constraints de `upsert` esperadas (`user_id` e `manager_id,store_id`).
-
