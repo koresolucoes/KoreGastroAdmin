@@ -7,6 +7,13 @@ async function replacePermissions(planId, keys) {
   }
 }
 
+async function makePopularExclusive(planId) {
+  await supabase(`/rest/v1/plans?id=neq.${encodeURIComponent(planId)}&isMostPopular=eq.true`, {
+    method: 'PATCH',
+    body: { isMostPopular: false }
+  });
+}
+
 function normalizePlan(input, partial = false) {
   const plan = input && typeof input === 'object' ? input : {};
   const normalized = {};
@@ -29,6 +36,10 @@ function normalizePlan(input, partial = false) {
     normalized[target] = value;
   }
   if (!partial || plan.recurring !== undefined) normalized.recurring = plan.recurring !== false;
+  if (!partial || plan.description !== undefined) normalized.description = cleanText(plan.description, 500) || null;
+  if (!partial || plan.preapproval_plan_id !== undefined) normalized.preapproval_plan_id = cleanText(plan.preapproval_plan_id, 255) || null;
+  if (!partial || plan.mp_reason !== undefined) normalized.mp_reason = cleanText(plan.mp_reason, 255) || null;
+  if (!partial || plan.isMostPopular !== undefined) normalized.isMostPopular = Boolean(plan.isMostPopular);
   return normalized;
 }
 
@@ -49,6 +60,7 @@ export default async function handler(req, res) {
       const normalizedPlan = normalizePlan(plan);
       const created = await supabase('/rest/v1/plans', { method: 'POST', headers: { Prefer: 'return=representation' }, body: normalizedPlan });
       await replacePermissions(created.data[0].id, [...new Set(permissions.map((key) => cleanText(key, 120)).filter(Boolean))]);
+      if (normalizedPlan.isMostPopular) await makePopularExclusive(created.data[0].id);
       await auditAdminAction(context, 'ADMIN_PLAN_CREATED', { plan: created.data[0], permissionCount: permissions.length });
       return reply(res, 201, { data: created.data[0] });
     }
@@ -58,10 +70,13 @@ export default async function handler(req, res) {
       assert((normalizedPlan && Object.keys(normalizedPlan).length) || permissionsProvided, 'Nenhuma alteração válida foi informada.');
       if (normalizedPlan && Object.keys(normalizedPlan).length) await supabase(`/rest/v1/plans?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: normalizedPlan });
       if (permissionsProvided) await replacePermissions(id, [...new Set(permissions.map((key) => cleanText(key, 120)).filter(Boolean))]);
+      if (normalizedPlan?.isMostPopular) await makePopularExclusive(id);
       await auditAdminAction(context, 'ADMIN_PLAN_UPDATED', { planId: id, changes: normalizedPlan || {}, permissionCount: permissionsProvided ? permissions.length : null });
       return reply(res, 200, { success: true });
     }
     if (req.method === 'DELETE') {
+      const linked = await supabase(`/rest/v1/subscriptions?select=id&plan_id=eq.${encodeURIComponent(id)}&limit=1`);
+      assert(!linked.data?.length, 'Este plano possui assinaturas vinculadas e não pode ser excluído.');
       await supabase(`/rest/v1/plans?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
       await auditAdminAction(context, 'ADMIN_PLAN_DELETED', { planId: id });
       return reply(res, 200, { success: true });

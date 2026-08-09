@@ -16,6 +16,8 @@ const required = [
   'api/admin/subscriptions.js',
   'api/admin/tickets.js',
   'api/admin/messages.js',
+  'api/admin/plans.js',
+  'api/admin/tenant-menu.js',
   'api/admin/provision-tenant.js'
 ];
 
@@ -37,7 +39,7 @@ const v2Rewrite = config.rewrites.some((rewrite) => rewrite.source === '/api/v2/
 if (!v2Rewrite) throw new Error('Compatibilidade /api/v2/admin ausente no vercel.json');
 
 const appSource = await readFile('public/app.js', 'utf8');
-for (const endpoint of ['/api/admin/customers', '/api/admin/dashboard', '/api/admin/subscriptions', '/api/admin/tickets']) {
+for (const endpoint of ['/api/admin/customers', '/api/admin/dashboard', '/api/admin/subscriptions', '/api/admin/tickets', '/api/admin/plans', '/api/admin/tenant-menu', '/api/admin/provision-tenant']) {
   if (!appSource.includes(endpoint)) throw new Error(`Frontend não consome o endpoint obrigatório ${endpoint}`);
 }
 

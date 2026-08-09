@@ -17,7 +17,10 @@
     ticketSummary: null,
     ticketMeta: null,
     menu: [],
+    menuCategories: [],
+    menuMeta: null,
     selectedTenant: '',
+    selectedStore: '',
     selectedTicketId: '',
     admins: null,
     health: null,
@@ -26,7 +29,7 @@
     modal: null,
     sidebarOpen: false,
     globalQuery: '',
-    filters: { customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active' }
+    filters: { customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active', catalog: '', catalogCategory: 'all', catalogStatus: 'all' }
   };
 
   const navigation = [
@@ -58,6 +61,18 @@
   const normalize = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const includes = (haystack, needle) => normalize(haystack).includes(normalize(needle));
   const toInputDate = (value) => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toISOString().slice(0, 10) : '';
+
+  function randomPassword() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+    const bytes = new Uint32Array(32);
+    window.crypto.getRandomValues(bytes);
+    const password = ['A', 'a', '2', '!', ...Array.from(bytes.slice(0, 14), (value) => alphabet[value % alphabet.length])];
+    for (let index = password.length - 1; index > 0; index -= 1) {
+      const swap = bytes[index] % (index + 1);
+      [password[index], password[swap]] = [password[swap], password[index]];
+    }
+    return password.join('');
+  }
 
   function relative(value) {
     if (!value) return 'sem registro';
@@ -149,7 +164,7 @@
       });
     } finally {
       sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], admins: null, health: null, logs: null });
+      Object.assign(state, { token: '', user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, health: null, logs: null });
       render();
     }
   }
@@ -170,6 +185,10 @@
       state.ticketSummary = tickets.summary || null;
       state.ticketMeta = tickets.meta || null;
       if (!state.selectedTenant && state.tenants[0]) state.selectedTenant = state.tenants[0].accountId || state.tenants[0].id;
+      const selectedCustomer = state.tenants.find((tenant) => String(tenant.accountId || tenant.id) === String(state.selectedTenant));
+      if (!selectedCustomer?.stores?.some((store) => String(store.storeId || store.id) === String(state.selectedStore))) {
+        state.selectedStore = selectedCustomer?.stores?.[0]?.storeId || selectedCustomer?.stores?.[0]?.id || '';
+      }
       if (!state.selectedTicketId && state.tickets[0]) state.selectedTicketId = state.tickets[0].id;
     } finally {
       state.loading = false;
@@ -184,7 +203,18 @@
       state.ticketSummary = tickets.summary || null;
       state.ticketMeta = tickets.meta || null;
     }
-    if (section === 'catalog' && state.selectedTenant) state.menu = (await api(`/api/admin/tenant-menu?tenantId=${encodeURIComponent(state.selectedTenant)}`)).data || [];
+    if (section === 'catalog') {
+      if (!state.selectedStore) {
+        state.menu = [];
+        state.menuCategories = [];
+        state.menuMeta = null;
+      } else {
+        const menu = await api(`/api/admin/tenant-menu?storeId=${encodeURIComponent(state.selectedStore)}`);
+        state.menu = menu.data || [];
+        state.menuCategories = menu.categories || [];
+        state.menuMeta = menu.meta || null;
+      }
+    }
     if (section === 'administrators' && (force || !state.admins)) state.admins = (await api('/api/admin/administrators')).data || [];
     if (section === 'health' && (force || !state.health)) state.health = await api('/api/admin/health');
     if (section === 'logs' && (force || !state.logs)) state.logs = (await api('/api/admin/logs')).data || [];
@@ -379,28 +409,48 @@
   }
 
   function plans() {
+    const activeSubscriptions = state.tenants.map(subscriptionOf).filter((subscription) => subscription?.status === 'active' && subscription.entitlementActive);
+    const contractedMonthly = activeSubscriptions.reduce((total, subscription) => total + Number(planById(subscription.plan_id)?.price || 0), 0);
+    const integrationGaps = state.plans.filter((plan) => plan.recurring && !plan.preapproval_plan_id).length;
     const planCards = state.plans.map((plan) => {
-      const subscribers = state.tenants.filter((tenant) => tenant.subscriptions?.some((subscription) => String(subscription.plan_id) === String(plan.id) && subscription.status === 'active')).length;
+      const subscribers = activeSubscriptions.filter((subscription) => String(subscription.plan_id) === String(plan.id)).length;
+      const linkedSubscriptions = state.tenants.filter((tenant) => String(subscriptionOf(tenant)?.plan_id) === String(plan.id)).length;
       const permissions = (plan.plan_permissions || []).map((permission) => permission.permission_key);
-      return `<article class="plan-card"><header><span><small>PLANO</small><h2>${escape(plan.name)}</h2></span><button class="more-button" aria-label="Opções">•••</button></header><div class="plan-price"><strong>${money(plan.price)}</strong><span>/ mês</span></div><div class="plan-stats"><span><strong>${subscribers}</strong><small>assinantes ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(key)}</span>`).join('') || '<span class="muted">Nenhuma permissão vinculada</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} permissões</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de trial</span><button class="danger-link" data-action="delete-plan" data-id="${plan.id}">Excluir plano</button></footer></article>`;
+      const billingState = !plan.recurring ? '<span class="billing-state neutral">Pagamento único</span>' : plan.preapproval_plan_id ? '<span class="billing-state ready">Mercado Pago conectado</span>' : '<span class="billing-state warning">Recorrência pendente</span>';
+      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${plan.recurring ? 'ASSINATURA' : 'ACESSO ÚNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descrição comercial.')}</p></span><button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button></header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${plan.recurring ? '/ mês' : ' pagamento único'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span><span><strong>${permissions.length}</strong><small>permissões</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(key)}</span>`).join('') || '<span class="muted">Nenhuma permissão vinculada</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} permissões</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de trial</span><div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div></footer></article>`;
     }).join('');
-    return `<section class="page">${pageHeader('ESTRATÉGIA COMERCIAL', 'Planos e permissões', 'Defina o catálogo comercial e o que cada assinatura pode acessar.', `<button class="primary" data-action="open-plan">＋ Criar plano</button>`)}<div class="plan-grid">${planCards || '<div class="panel empty">Nenhum plano cadastrado.</div>'}</div></section>`;
+    return `<section class="page">${pageHeader('ESTRATÉGIA COMERCIAL', 'Planos e permissões', 'Modele preço, recorrência, limites e acesso sem editar o banco manualmente.', `<button class="primary" data-action="open-plan">＋ Criar plano</button>`)}
+      ${integrationGaps ? `<div class="integration-warning"><span>!</span><div><strong>${integrationGaps} plano(s) recorrente(s) sem vínculo de cobrança</strong><p>Adicione o ID do plano de recorrência do Mercado Pago antes de comercializar esses planos.</p></div></div>` : ''}
+      <div class="summary-strip"><div><span>Planos no catálogo</span><strong>${state.plans.length}</strong></div><div><span>Acessos ativos</span><strong>${activeSubscriptions.length}</strong></div><div><span>Receita contratada</span><strong>${money(contractedMonthly)}</strong></div><div class="${integrationGaps ? 'warning-text' : ''}"><span>Integrações pendentes</span><strong>${integrationGaps}</strong></div></div>
+      <div class="plan-grid">${planCards || '<div class="panel empty">Nenhum plano cadastrado.</div>'}</div></section>`;
   }
 
   function catalog() {
-    const selected = state.tenants.find((tenant) => String(tenant.id) === String(state.selectedTenant));
-    const options = state.tenants.map((tenant) => `<option value="${tenant.id}" ${String(tenant.id) === String(state.selectedTenant) ? 'selected' : ''}>${escape(tenant.full_name)} — ${escape(tenant.stores?.[0]?.name || tenant.email)}</option>`).join('');
-    const available = state.menu.filter((item) => item.is_available).length;
-    return `<section class="page">${pageHeader('OPERAÇÃO DO PRODUTO', 'Inspetor de cardápios', 'Consulte e controle a disponibilidade dos itens de cada cliente.', `<select class="tenant-select" data-action="select-tenant" aria-label="Selecionar cliente">${options}</select>`)}
-      <div class="summary-strip"><div><span>Cliente selecionado</span><strong>${escape(selected?.full_name || '—')}</strong></div><div><span>Itens no cardápio</span><strong>${state.menu.length}</strong></div><div><span>Disponíveis</span><strong>${available}</strong></div><div><span>Pausados</span><strong>${state.menu.length - available}</strong></div></div>
-      <div class="panel table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Disponibilidade</th><th></th></tr></thead><tbody>${state.menu.map((item) => `<tr><td><strong>${escape(item.name)}</strong><small>ID ${escape(String(item.id).slice(0, 8))}</small></td><td>${escape(item.categories?.name || 'Geral')}</td><td><strong>${money(item.price)}</strong></td><td><span class="availability ${item.is_available ? 'on' : 'off'}"><i></i>${item.is_available ? 'Disponível' : 'Pausado'}</span></td><td><button class="row-action" data-action="toggle-menu" data-id="${item.id}" data-available="${item.is_available}">${item.is_available ? 'Pausar item' : 'Disponibilizar'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Este cliente ainda não possui itens no cardápio.</td></tr>'}</tbody></table></div>
+    const selected = state.tenants.find((tenant) => String(tenant.accountId || tenant.id) === String(state.selectedTenant));
+    const customerOptions = state.tenants.map((tenant) => `<option value="${tenant.accountId || tenant.id}" ${String(tenant.accountId || tenant.id) === String(state.selectedTenant) ? 'selected' : ''}>${escape(tenant.full_name)} — ${tenant.stores?.length || 0} loja(s)</option>`).join('');
+    const storeOptions = (selected?.stores || []).map((store) => `<option value="${store.storeId || store.id}" ${String(store.storeId || store.id) === String(state.selectedStore) ? 'selected' : ''}>${escape(store.name)}</option>`).join('');
+    const query = state.filters.catalog;
+    const category = state.filters.catalogCategory;
+    const availability = state.filters.catalogStatus;
+    const rows = state.menu.filter((item) => {
+      const matchesText = !query || includes(`${item.name} ${item.description || ''} ${item.categories?.name || ''} ${item.external_code || ''}`, query);
+      const matchesCategory = category === 'all' || String(item.category_id) === String(category);
+      const matchesAvailability = availability === 'all' || (availability === 'available' ? item.is_available : !item.is_available);
+      return matchesText && matchesCategory && matchesAvailability;
+    });
+    const meta = state.menuMeta || { total: 0, available: 0, paused: 0, averagePrice: 0 };
+    const contextActions = `<div class="catalog-context"><label><span>CLIENTE</span><select data-action="select-tenant" aria-label="Selecionar cliente">${customerOptions}</select></label><label><span>OPERAÇÃO</span><select data-action="select-store" aria-label="Selecionar operação" ${storeOptions ? '' : 'disabled'}>${storeOptions || '<option>Sem loja cadastrada</option>'}</select></label></div>`;
+    return `<section class="page">${pageHeader('OPERAÇÃO DO PRODUTO', 'Gestão de cardápios', 'Consulte e edite os itens da loja correta com todas as ações passando pela API.', contextActions)}
+      <div class="summary-strip catalog-summary"><div><span>Cliente</span><strong>${escape(selected?.full_name || '—')}</strong></div><div><span>Itens</span><strong>${meta.total || 0}</strong></div><div><span>Disponíveis</span><strong>${meta.available || 0}</strong></div><div><span>Pausados</span><strong>${meta.paused || 0}</strong></div><div><span>Preço médio</span><strong>${money(meta.averagePrice)}</strong></div></div>
+      <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="catalog" value="${escape(query)}" placeholder="Buscar item, categoria ou código" /></div><select data-filter="catalogCategory" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option>${state.menuCategories.map((item) => `<option value="${item.id}" ${String(category) === String(item.id) ? 'selected' : ''}>${escape(item.name)}</option>`).join('')}</select><select data-filter="catalogStatus" aria-label="Filtrar disponibilidade"><option value="all" ${availability === 'all' ? 'selected' : ''}>Todos os itens</option><option value="available" ${availability === 'available' ? 'selected' : ''}>Disponíveis</option><option value="paused" ${availability === 'paused' ? 'selected' : ''}>Pausados</option></select><button class="primary" data-action="open-catalog-item" ${state.selectedStore ? '' : 'disabled'}>＋ Novo item</button><span class="result-count">${rows.length} resultado(s)</span></div>
+      <div class="panel table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Preparo</th><th>Disponibilidade</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.name)}</strong><small>${escape(item.description || item.external_code || `ID ${String(item.id).slice(0, 8)}`)}</small></td><td>${escape(item.categories?.name || 'Geral')}</td><td><strong>${money(item.price)}</strong></td><td><strong>${item.prep_time_in_minutes || 0} min</strong></td><td><span class="availability ${item.is_available ? 'on' : 'off'}"><i></i>${item.is_available ? 'Disponível' : 'Pausado'}</span></td><td><div class="row-actions"><button class="row-action" data-action="edit-catalog-item" data-id="${item.id}">Editar</button><button class="row-action" data-action="toggle-menu" data-id="${item.id}" data-available="${item.is_available}">${item.is_available ? 'Pausar' : 'Ativar'}</button></div></td></tr>`).join('') || `<tr><td colspan="6" class="empty">${state.selectedStore ? 'Nenhum item encontrado nesta operação.' : 'Selecione um cliente com loja para gerenciar o cardápio.'}</td></tr>`}</tbody></table></div>
     </section>`;
   }
 
   function provision() {
-    return `<section class="page onboarding-page">${pageHeader('NOVO CLIENTE', 'Onboarding ChefOS', 'Crie a estrutura inicial completa para uma nova operação.', '')}
-      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Identidade</strong><small>Conta existente no Auth</small></span><span><i>2</i><strong>Plano e acesso</strong><small>Trial conforme o plano</small></span><span><i>3</i><strong>Estrutura inicial</strong><small>Loja, salão e mesas</small></span><div class="onboarding-note"><strong>Fluxo seguro para reenvio</strong><p>A API reaproveita loja e assinatura existentes. Se uma etapa falhar, corrija a causa e envie novamente sem duplicar a estrutura principal.</p></div></aside>
-        <form class="panel onboarding-form" data-form="provision"><div class="integration-warning compact-warning"><span>i</span><div><strong>A conta precisa existir primeiro</strong><p>Crie ou convide o proprietário no Supabase Auth e cole abaixo o UUID da conta — não o ID da loja.</p></div></div><div class="form-section"><span class="section-number">01</span><div><h2>Cliente e operação</h2><p class="muted">A API valida a identidade antes de criar qualquer dado.</p></div></div><div class="form-grid"><label>ID da conta (UUID)<input name="accountId" required minlength="36" maxlength="36" placeholder="00000000-0000-0000-0000-000000000000" /></label><label>Nome da operação<input name="storeName" required maxlength="180" placeholder="Ex.: Bistrô Central" /></label><label>CNPJ<input name="cnpj" maxlength="30" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" maxlength="40" placeholder="(00) 00000-0000" /></label><label class="wide">Endereço<input name="address" maxlength="300" placeholder="Rua, número, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Plano inicial</h2><p class="muted">O período de trial segue a configuração real do plano selecionado.</p></div></div><label>Plano ChefOS<select name="planId"><option value="">Selecionar automaticamente o plano de entrada</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} — ${money(plan.price)}/mês · ${plan.trial_period_days || 0} dias de trial</option>`).join('')}</select></label><footer><span><i>✓</i> Loja, perfil, acesso, salão, 6 mesas e chave UUID via API</span><button class="primary" type="submit">Provisionar estrutura →</button></footer></form>
+    return `<section class="page onboarding-page">${pageHeader('NOVO CLIENTE', 'Onboarding ChefOS', 'Crie a conta, a operação e o acesso inicial em um único fluxo.', '')}
+      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Criar acesso</strong><small>Nome, e-mail e senha</small></span><span><i>2</i><strong>Configurar operação</strong><small>Empresa e loja principal</small></span><span><i>3</i><strong>Ativar plano</strong><small>Trial, permissões e estrutura</small></span><div class="onboarding-note"><strong>Sem UUID manual</strong><p>A API cria a conta no Supabase Auth e usa o identificador internamente. Se o e-mail já existir, a conta é reutilizada sem trocar sua senha.</p></div></aside>
+        <form class="panel onboarding-form" data-form="provision"><div class="onboarding-intro"><span>✦</span><div><strong>Ativação completa em uma ação</strong><p>Ao finalizar, o cliente poderá entrar no ChefOS com o e-mail e a senha inicial definidos abaixo.</p></div></div><div class="form-section"><span class="section-number">01</span><div><h2>Acesso do proprietário</h2><p class="muted">Estes dados criam a conta real do cliente.</p></div></div><div class="form-grid"><label>Nome completo<input name="fullName" required maxlength="160" autocomplete="off" placeholder="Ex.: Mariana Costa" /></label><label>E-mail de acesso<input name="email" type="email" required maxlength="254" autocomplete="off" placeholder="mariana@restaurante.com" /></label><label class="wide password-field">Senha inicial<span><input name="initialPassword" type="text" required minlength="10" maxlength="128" autocomplete="off" placeholder="Mínimo de 10 caracteres" /><button type="button" class="secondary" data-action="generate-password">Gerar senha segura</button></span><small>Guarde esta senha para entregar ao cliente. Ela não será salva no painel.</small></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Empresa e operação</h2><p class="muted">Dados usados na loja principal e no perfil empresarial.</p></div></div><div class="form-grid"><label>Nome da operação<input name="storeName" required maxlength="180" placeholder="Ex.: Bistrô Central" /></label><label>CNPJ<input name="cnpj" required maxlength="30" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" maxlength="40" placeholder="(00) 00000-0000" /></label><label>Endereço<input name="address" maxlength="300" placeholder="Rua, número, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">03</span><div><h2>Plano e ativação</h2><p class="muted">O trial e os limites seguem o plano selecionado.</p></div></div><label>Plano ChefOS<select name="planId" required><option value="">Selecione o plano</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} — ${money(plan.price)}${plan.recurring ? '/mês' : ''} · ${plan.trial_period_days || 0} dias de trial</option>`).join('')}</select></label><label class="confirmation-check"><input type="checkbox" name="confirm" required /><span><strong>Confirmo a criação desta conta e estrutura</strong><small>Será criado o usuário, perfil, loja, assinatura, permissões, salão e seis mesas.</small></span></label><footer><span><i>✓</i> Todo o fluxo usa APIs administrativas auditadas</span><button class="primary" type="submit">Criar cliente e ativar ChefOS →</button></footer></form>
       </div></section>`;
   }
 
@@ -447,7 +497,29 @@
   }
 
   function planModal() {
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal" data-form="plan"><header><div><p class="eyebrow">CATÁLOGO COMERCIAL</p><h2 id="modal-title">Criar novo plano</h2><p>Configure preço, limites e acesso do plano.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body form-grid"><label>Nome do plano<input name="name" required placeholder="Profissional" /></label><label>Identificador<input name="slug" required placeholder="profissional" /></label><label>Preço mensal<input name="price" type="number" step="0.01" min="0" required placeholder="199,00" /></label><label>Trial (dias)<input name="trial" type="number" min="0" value="30" /></label><label>Máximo de lojas<input name="stores" type="number" min="1" value="1" /></label><label class="wide">Permissões separadas por vírgula<input name="permissions" placeholder="/dashboard, /pos, /reports" /></label></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Criar plano</button></footer></form></div>`;
+    const source = state.modal?.id ? state.plans.find((plan) => String(plan.id) === String(state.modal.id)) : null;
+    const duplicate = Boolean(state.modal?.duplicate);
+    const editing = Boolean(source && !duplicate);
+    const permissions = (source?.plan_permissions || []).map((permission) => permission.permission_key).join(', ');
+    const name = duplicate ? `${source?.name || ''} Cópia` : source?.name || '';
+    const slug = duplicate ? `${source?.slug || 'plano'}-copia` : source?.slug || '';
+    const recurring = source ? source.recurring !== false : true;
+    const preapprovalPlanId = duplicate ? '' : source?.preapproval_plan_id || '';
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal plan-modal" data-form="plan"><header><div><p class="eyebrow">CATÁLOGO COMERCIAL</p><h2 id="modal-title">${editing ? `Editar ${escape(source.name)}` : duplicate ? 'Duplicar plano' : 'Criar novo plano'}</h2><p>Preço, recorrência, limites, cobrança e permissões em um único lugar.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="id" value="${editing ? source.id : ''}"/><div class="form-grid"><label>Nome do plano<input name="name" required maxlength="120" value="${escape(name)}" placeholder="Profissional" /></label><label>Identificador interno<input name="slug" required maxlength="80" pattern="[a-z0-9_-]+" value="${escape(slug)}" placeholder="profissional" /></label><label class="wide">Descrição comercial<textarea name="description" maxlength="500" placeholder="Para quem é este plano e qual seu principal benefício?">${escape(source?.description || '')}</textarea></label><label>Preço<input name="price" type="number" step="0.01" min="0" required value="${source?.price ?? ''}" placeholder="199,00" /></label><label>Máximo de lojas<input name="stores" type="number" min="1" step="1" required value="${source?.max_stores || 1}" /></label><label>Trial (dias)<input name="trial" type="number" min="0" step="1" value="${source?.trial_period_days || 0}" /></label><label>Descrição no Mercado Pago<input name="mpReason" maxlength="255" value="${escape(source?.mp_reason || '')}" placeholder="ChefOS Profissional" /></label><label class="wide">ID do plano recorrente no Mercado Pago<input name="preapprovalPlanId" maxlength="255" value="${escape(preapprovalPlanId)}" placeholder="2c938084..." /><small>Ao duplicar um plano, este vínculo não é copiado.</small></label><label class="wide">Permissões separadas por vírgula<textarea name="permissions" placeholder="/dashboard, /pos, /reports">${escape(permissions)}</textarea></label></div><div class="choice-grid"><label><input type="checkbox" name="recurring" ${recurring ? 'checked' : ''}/><span><strong>Cobrança recorrente</strong><small>Renovação mensal do acesso</small></span></label><label><input type="checkbox" name="popular" ${source?.isMostPopular && !duplicate ? 'checked' : ''}/><span><strong>Destacar como mais popular</strong><small>Remove o destaque dos demais planos</small></span></label></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">${editing ? 'Salvar alterações' : 'Criar plano'}</button></footer></form></div>`;
+  }
+
+  function catalogItemModal() {
+    const item = state.modal?.id ? state.menu.find((entry) => String(entry.id) === String(state.modal.id)) : null;
+    const store = state.tenants.flatMap((tenant) => tenant.stores || []).find((entry) => String(entry.storeId || entry.id) === String(state.selectedStore));
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal" data-form="catalog-item"><header><div><p class="eyebrow">CARDÁPIO · ${escape(store?.name || 'OPERAÇÃO')}</p><h2 id="modal-title">${item ? `Editar ${escape(item.name)}` : 'Adicionar item ao cardápio'}</h2><p>A alteração será publicada na operação selecionada.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body form-grid"><input type="hidden" name="id" value="${item?.id || ''}"/><label>Nome do item<input name="name" required maxlength="180" value="${escape(item?.name || '')}" placeholder="Ex.: Risoto de cogumelos" /></label><label>Categoria<input name="category" list="catalog-categories" required maxlength="120" value="${escape(item?.categories?.name || 'Geral')}" placeholder="Pratos principais" /><datalist id="catalog-categories">${state.menuCategories.map((category) => `<option value="${escape(category.name)}"></option>`).join('')}</datalist></label><label>Preço<input name="price" type="number" step="0.01" min="0" required value="${item?.price ?? ''}" placeholder="39,90" /></label><label>Tempo de preparo (min)<input name="prepTime" type="number" min="0" max="1440" step="1" required value="${item?.prep_time_in_minutes ?? 15}" /></label><label>Código externo<input name="externalCode" maxlength="120" value="${escape(item?.external_code || '')}" placeholder="SKU-001" /></label><label class="wide">Descrição<textarea name="description" maxlength="1000" placeholder="Descrição exibida no cardápio">${escape(item?.description || '')}</textarea></label><label class="confirmation-check wide"><input type="checkbox" name="available" ${item?.is_available !== false ? 'checked' : ''}/><span><strong>Disponível para venda</strong><small>Desmarque para criar ou manter o item pausado.</small></span></label></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">${item ? 'Salvar item' : 'Adicionar ao cardápio'}</button></footer></form></div>`;
+  }
+
+  function onboardingSuccessModal() {
+    const result = state.modal?.data || {};
+    const auth = result.auth || {};
+    const tenant = result.tenant || {};
+    const plan = planById(tenant.planId);
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><section class="modal-card onboarding-success"><header><div><p class="eyebrow">ATIVAÇÃO CONCLUÍDA</p><h2 id="modal-title">Cliente pronto para entrar</h2><p>${auth.userCreated ? 'A conta e a estrutura ChefOS foram criadas.' : 'A conta existente foi reutilizada e a estrutura foi validada.'}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><div class="success-mark">✓</div><div class="credential-list"><div><span><small>E-MAIL DE ACESSO</small><strong>${escape(auth.email || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="email">Copiar</button></div>${auth.userCreated ? `<div><span><small>SENHA INICIAL</small><strong>${escape(state.modal.password || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="password">Copiar</button></div>` : '<div class="credential-note"><i>i</i><span><strong>Senha preservada</strong><small>O e-mail já existia; a senha informada não foi aplicada.</small></span></div>'}<div><span><small>OPERAÇÃO</small><strong>${escape(tenant.storeName || '')}</strong></span></div><div><span><small>PLANO INICIAL</small><strong>${escape(plan?.name || 'Plano configurado')}</strong></span></div><div><span><small>CHAVE DE INTEGRAÇÃO</small><strong class="technical-value">${escape(tenant.apiKey || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="apiKey">Copiar</button></div></div><div class="security-reminder"><strong>Entregue as credenciais por um canal seguro</strong><p>A senha inicial só permanece nesta tela enquanto o modal estiver aberto.</p></div></div><footer><button class="secondary" data-action="close-modal">Fechar</button><button class="primary" data-action="view-provisioned-customer" data-id="${tenant.accountId || ''}">Abrir visão do cliente</button></footer></section></div>`;
   }
 
   function modalView() {
@@ -455,6 +527,8 @@
     if (state.modal.type === 'subscription') return subscriptionModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
     if (state.modal.type === 'tenant') return tenantModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
     if (state.modal.type === 'plan') return planModal();
+    if (state.modal.type === 'catalog-item') return catalogItemModal();
+    if (state.modal.type === 'onboarding-success') return onboardingSuccessModal();
     return '';
   }
 
@@ -528,10 +602,19 @@
       return;
     }
     if (form.dataset.form === 'plan') {
-      await api('/api/admin/plans', { method: 'POST', body: { plan: { name: values.name, slug: values.slug, price: Number(values.price), trial_period_days: Number(values.trial), max_stores: Number(values.stores) }, permissions: String(values.permissions || '').split(',').map((item) => item.trim()).filter(Boolean) } });
+      const editing = Boolean(values.id);
+      await api('/api/admin/plans', { method: editing ? 'PUT' : 'POST', body: { id: values.id || undefined, plan: { name: values.name, slug: values.slug, description: values.description, price: Number(values.price), trial_period_days: Number(values.trial), max_stores: Number(values.stores), recurring: values.recurring === 'on', isMostPopular: values.popular === 'on', preapproval_plan_id: values.preapprovalPlanId, mp_reason: values.mpReason }, permissions: String(values.permissions || '').split(',').map((item) => item.trim()).filter(Boolean) } });
       state.plans = (await api('/api/admin/plans')).data || [];
       state.modal = null;
-      showNotice('Plano criado com sucesso.');
+      showNotice(editing ? 'Plano atualizado com sucesso.' : 'Plano criado com sucesso.');
+      return;
+    }
+    if (form.dataset.form === 'catalog-item') {
+      const item = { name: values.name, category: values.category, price: Number(values.price), prep_time_in_minutes: Number(values.prepTime), description: values.description, external_code: values.externalCode, is_available: values.available === 'on' };
+      await api('/api/admin/tenant-menu', { method: values.id ? 'PUT' : 'POST', body: { storeId: state.selectedStore, id: values.id || undefined, item } });
+      state.modal = null;
+      await loadSection('catalog');
+      showNotice(values.id ? 'Item atualizado no cardápio.' : 'Item adicionado ao cardápio.');
       return;
     }
     if (form.dataset.form === 'reply') {
@@ -547,7 +630,8 @@
       state.loading = true; render();
       const result = await api('/api/admin/provision-tenant', { method: 'POST', body: values });
       await loadCore();
-      showNotice(`${result.idempotent ? 'Estrutura existente validada' : 'Cliente provisionado'}. Chave de integração: ${result.tenant.apiKey}`);
+      state.modal = { type: 'onboarding-success', data: result, password: values.initialPassword };
+      render();
       return;
     }
     if (form.dataset.form === 'admin') {
@@ -569,10 +653,32 @@
     if (action === 'dismiss-notice') { state.notice = null; render(); return; }
     if (action === 'close-modal') { state.modal = null; render(); return; }
     if (action === 'open-plan') { state.modal = { type: 'plan' }; render(); return; }
+    if (action === 'edit-plan') { state.modal = { type: 'plan', id: target.dataset.id }; render(); return; }
+    if (action === 'duplicate-plan') { state.modal = { type: 'plan', id: target.dataset.id, duplicate: true }; render(); return; }
+    if (action === 'open-catalog-item') { state.modal = { type: 'catalog-item' }; render(); return; }
+    if (action === 'edit-catalog-item') { state.modal = { type: 'catalog-item', id: target.dataset.id }; render(); return; }
+    if (action === 'generate-password') {
+      const input = target.closest('form')?.querySelector('[name="initialPassword"]');
+      if (input) { input.value = randomPassword(); input.focus(); input.select(); }
+      return;
+    }
+    if (action === 'copy-onboarding') {
+      const values = { email: state.modal?.data?.auth?.email, password: state.modal?.password, apiKey: state.modal?.data?.tenant?.apiKey };
+      await navigator.clipboard.writeText(String(values[target.dataset.copy] || ''));
+      showNotice('Informação copiada com segurança.');
+      return;
+    }
+    if (action === 'view-provisioned-customer') { state.modal = { type: 'tenant', id: target.dataset.id }; render(); return; }
     if (action === 'open-provision') return openSection('provision');
     if (action === 'open-tenant') { state.globalQuery = ''; state.modal = { type: 'tenant', id: target.dataset.id }; render(); return; }
     if (action === 'edit-subscription') { state.modal = { type: 'subscription', id: target.dataset.id }; render(); return; }
-    if (action === 'tenant-catalog') { state.modal = null; state.selectedTenant = target.dataset.id; return openSection('catalog'); }
+    if (action === 'tenant-catalog') {
+      state.modal = null;
+      state.selectedTenant = target.dataset.id;
+      const tenant = state.tenants.find((item) => String(item.accountId || item.id) === String(target.dataset.id));
+      state.selectedStore = tenant?.stores?.[0]?.storeId || tenant?.stores?.[0]?.id || '';
+      return openSection('catalog');
+    }
     if (action === 'export') { downloadCsv(target.dataset.kind); return; }
     if (action === 'ticket-filter') { state.filters.ticketStatus = target.dataset.value; render(); return; }
     if (action === 'select-ticket') { state.selectedTicketId = target.dataset.id; render(); return; }
@@ -590,7 +696,7 @@
     if (action === 'reload-health') { state.health = null; state.loading = true; render(); await loadSection('health', true); state.loading = false; render(); return; }
     if (action === 'reload-logs') { state.logs = null; state.loading = true; render(); await loadSection('logs', true); state.loading = false; render(); return; }
     if (action === 'toggle-menu') {
-      await api('/api/admin/tenant-menu', { method: 'PUT', body: { id: target.dataset.id, updates: { is_available: target.dataset.available !== 'true' } } });
+      await api('/api/admin/tenant-menu', { method: 'PUT', body: { storeId: state.selectedStore, id: target.dataset.id, item: { is_available: target.dataset.available !== 'true' } } });
       await loadSection('catalog'); render(); showNotice('Disponibilidade atualizada.'); return;
     }
     if (action === 'delete-plan') {
@@ -617,9 +723,16 @@
   document.addEventListener('change', (event) => safe(async () => {
     const filter = event.target.closest('[data-filter]');
     if (filter) { state.filters[filter.dataset.filter] = filter.value; render(); return; }
-    const select = event.target.closest('[data-action="select-tenant"]');
-    if (!select) return;
-    state.selectedTenant = select.value;
+    const customerSelect = event.target.closest('[data-action="select-tenant"]');
+    const storeSelect = event.target.closest('[data-action="select-store"]');
+    if (!customerSelect && !storeSelect) return;
+    if (customerSelect) {
+      state.selectedTenant = customerSelect.value;
+      const tenant = state.tenants.find((item) => String(item.accountId || item.id) === String(state.selectedTenant));
+      state.selectedStore = tenant?.stores?.[0]?.storeId || tenant?.stores?.[0]?.id || '';
+    }
+    if (storeSelect) state.selectedStore = storeSelect.value;
+    state.filters.catalogCategory = 'all';
     state.loading = true; render();
     await loadSection('catalog');
     state.loading = false; render();

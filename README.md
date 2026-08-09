@@ -9,7 +9,10 @@ Aplicação independente para operar o painel administrativo do ChefOS. Ela reut
 - central de suporte com fila, prioridade, relógio de SLA, histórico de conversa e resolução;
 - visão 360º de clientes, lojas, assinatura, onboarding, atividade, suporte e cardápios;
 - exportação CSV de clientes e assinaturas;
-- onboarding guiado, catálogo de planos, saúde, auditoria e acessos administrativos.
+- onboarding que cria ou reutiliza o usuário pelo e-mail, sem exigir UUID;
+- gestão de planos com edição, duplicação, recorrência, Mercado Pago e permissões;
+- gestão de cardápios por cliente e loja, com criação, edição, filtros e disponibilidade;
+- saúde, auditoria e acessos administrativos.
 
 ## O que foi extraído
 
@@ -17,10 +20,10 @@ Aplicação independente para operar o painel administrativo do ChefOS. Ela reut
 | --- | --- | --- |
 | `/admin/dashboard` | `/` | indicadores SaaS, receita contratada, acesso e suporte |
 | usuários e lojas | `/api/admin/customers` | consulta paginada de clientes, lojas, assinaturas, onboarding e suporte |
-| planos | `/api/admin/plans` | listar, criar, atualizar permissões e excluir |
+| planos | `/api/admin/plans` | listar, criar, editar, duplicar, atualizar permissões e excluir quando não houver vínculos |
 | suporte | `/api/admin/tickets` e `/api/admin/messages` | chamados e respostas |
-| inspector de cardápio | `/api/admin/tenant-menu` | listar, criar e atualizar itens por tenant |
-| provisionamento | `/api/admin/provision-tenant` | loja, perfil, trial, salão, mesas e permissões |
+| gestão de cardápio | `/api/admin/tenant-menu` | listar, criar e atualizar itens por loja (`storeId`) |
+| provisionamento | `/api/admin/provision-tenant` | usuário Auth, perfil, loja, trial, salão, mesas e permissões |
 | administradores | `/api/admin/administrators` | gestão da allowlist `system_admins` |
 | health e logs | `/api/admin/health` e `/api/admin/logs` | observabilidade administrativa |
 
@@ -31,6 +34,8 @@ As rotas legadas continuam disponíveis por compatibilidade: `/api/v2/admin/*` a
 
 - A conta (`accountId`) é sempre o UUID do usuário proprietário no Supabase Auth.
 - A loja usa seu próprio `storeId`; os dois IDs não são misturados nas respostas novas.
+- O operador informa nome, e-mail e senha inicial no onboarding; o `accountId` é criado e usado internamente pela API.
+- Se o e-mail já existir no Supabase Auth, a conta é reutilizada e sua senha atual não é alterada.
 - Receita é exibida como **estimativa contratada** pelo preço atual do plano. Ela só deve ser chamada de MRR depois da conciliação com o provedor de pagamentos.
 - Alterações de assinatura exigem motivo e são gravadas em `system_logs` com estado anterior e posterior.
 - Alterações internas de status, plano ou vencimento ainda não sincronizam a recorrência do Mercado Pago; o painel exibe esse aviso antes de salvar.

@@ -11,10 +11,77 @@ import {
 } from '../_lib/admin.js';
 
 const DAY = 86400000;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-async function ensurePrimaryStore(accountId, storeName) {
+async function findAuthUserByEmail(email) {
+  const perPage = 200;
+  for (let page = 1; page <= 50; page += 1) {
+    const result = await supabase(`/auth/v1/admin/users?page=${page}&per_page=${perPage}`);
+    const users = result.data?.users || [];
+    const found = users.find((user) => String(user.email || '').toLowerCase() === email);
+    if (found) return found;
+    if (users.length < perPage) break;
+  }
+  return null;
+}
+
+async function ensureAuthUser(payload, storeName) {
+  if (payload.accountId || payload.userId) {
+    const accountId = payload.accountId || payload.userId;
+    assertUuid(accountId, 'accountId');
+    const result = await supabase(`/auth/v1/admin/users/${encodeURIComponent(accountId)}`);
+    assert(result.data?.id, 'Conta não encontrada no Supabase Auth.');
+    return { user: result.data, created: false };
+  }
+
+  const email = cleanText(payload.email, 254).toLowerCase();
+  const fullName = cleanText(payload.fullName, 160);
+  const initialPassword = String(payload.initialPassword || '');
+  assert(EMAIL_PATTERN.test(email), 'Informe um e-mail válido para o proprietário.');
+  assert(fullName.length >= 2, 'Nome do proprietário é obrigatório.');
+
+  const existing = await findAuthUserByEmail(email);
+  if (existing) return { user: existing, created: false };
+
+  assert(initialPassword.length >= 10, 'A senha inicial deve ter pelo menos 10 caracteres.');
+  assert(initialPassword.length <= 128, 'A senha inicial deve ter no máximo 128 caracteres.');
+  const created = await supabase('/auth/v1/admin/users', {
+    method: 'POST',
+    body: {
+      email,
+      password: initialPassword,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, name: storeName }
+    }
+  });
+  assert(created.data?.id, 'Não foi possível criar a conta no Supabase Auth.');
+  return { user: created.data, created: true };
+}
+
+async function ensureProfile(accountId, fullName) {
+  if (!fullName) return;
+  await supabase('/rest/v1/profiles?on_conflict=id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: { id: accountId, full_name: fullName, updated_at: new Date().toISOString() }
+  });
+}
+
+async function ensurePrimaryStore(accountId, storeName, renameTriggerStore = false) {
   const existing = await supabase(`/rest/v1/stores?select=id,name,owner_id,created_at&owner_id=eq.${encodeURIComponent(accountId)}&order=created_at.asc&limit=1`);
-  if (existing.data?.[0]) return { store: existing.data[0], created: false };
+  if (existing.data?.[0]) {
+    const store = existing.data[0];
+    const looksGenerated = !store.name || /\(Principal\)$/i.test(store.name) || store.name === 'Minha Loja';
+    if ((renameTriggerStore || looksGenerated) && store.name !== storeName) {
+      const renamed = await supabase(`/rest/v1/stores?id=eq.${encodeURIComponent(store.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: { name: storeName }
+      });
+      return { store: renamed.data?.[0] || { ...store, name: storeName }, created: false };
+    }
+    return { store, created: false };
+  }
 
   const created = await supabase('/rest/v1/stores', {
     method: 'POST',
@@ -109,8 +176,8 @@ export default async function handler(req, res) {
 
   try {
     const payload = await bodyOf(req);
-    const accountId = payload.accountId || payload.userId;
     const storeName = cleanText(payload.storeName, 180);
+    const fullName = cleanText(payload.fullName, 160);
     const values = {
       storeName,
       cnpj: cleanText(payload.cnpj, 30),
@@ -118,10 +185,10 @@ export default async function handler(req, res) {
       address: cleanText(payload.address, 300)
     };
 
-    assertUuid(accountId, 'accountId');
     assert(storeName.length >= 2, 'Nome da operação é obrigatório.');
-    const authUser = await supabase(`/auth/v1/admin/users/${encodeURIComponent(accountId)}`);
-    assert(authUser.data?.id, 'Conta não encontrada no Supabase Auth.');
+    const { user: authUser, created: authUserCreated } = await ensureAuthUser(payload, storeName);
+    const accountId = authUser.id;
+    await ensureProfile(accountId, fullName || cleanText(authUser.user_metadata?.full_name, 160));
 
     let planId = cleanText(payload.planId, 80);
     if (planId) assertUuid(planId, 'planId');
@@ -133,7 +200,7 @@ export default async function handler(req, res) {
     const plan = planResult.data?.[0];
     assert(plan, 'Plano não encontrado.');
 
-    const { store, created: storeCreated } = await ensurePrimaryStore(accountId, storeName);
+    const { store, created: storeCreated } = await ensurePrimaryStore(accountId, storeName, authUserCreated);
     assert(store?.id, 'Não foi possível criar ou localizar a loja principal.');
     const externalApiKey = await ensureCompanyProfile(store, values);
     const { subscription, created: subscriptionCreated } = await ensureSubscription(accountId, plan);
@@ -144,13 +211,20 @@ export default async function handler(req, res) {
       accountId,
       storeId: store.id,
       planId: plan.id,
+      authUserCreated,
       storeCreated,
       subscriptionCreated
     });
 
-    return reply(res, storeCreated || subscriptionCreated ? 201 : 200, {
+    return reply(res, authUserCreated || storeCreated || subscriptionCreated ? 201 : 200, {
       success: true,
-      idempotent: !storeCreated && !subscriptionCreated,
+      idempotent: !authUserCreated && !storeCreated && !subscriptionCreated,
+      auth: {
+        accountId,
+        email: authUser.email || cleanText(payload.email, 254).toLowerCase(),
+        userCreated: authUserCreated,
+        passwordChanged: false
+      },
       tenant: {
         accountId,
         storeId: store.id,
