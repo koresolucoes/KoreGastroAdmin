@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 const required = [
   'index.html',
+  'public/index.html',
   'vercel.json',
   'public/app.js',
   'public/admin.css',

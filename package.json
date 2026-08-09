@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Painel administrativo independente do KoreGastro, preparado para Vercel.",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "build": "node scripts/build.mjs && node scripts/verify.mjs",
@@ -13,4 +13,3 @@
     "dev": "npx vercel dev"
   }
 }
-
