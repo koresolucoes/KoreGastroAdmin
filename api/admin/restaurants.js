@@ -39,7 +39,10 @@ export default async function handler(req, res) {
         email: user.email,
         avatar_url: profile.avatar_url || user.user_metadata?.avatar_url || null,
         role: 'Proprietário',
+        created_at: user.created_at,
         updated_at: profile.updated_at || user.updated_at || user.created_at,
+        last_sign_in_at: user.last_sign_in_at || null,
+        email_confirmed_at: user.email_confirmed_at || null,
         stores: tenantStores.map(({ id, name, created_at }) => ({ id, name, created_at })),
         subscriptions: subscriptionsByUser.get(user.id) || []
       };
@@ -49,4 +52,3 @@ export default async function handler(req, res) {
     return fail(res, error);
   }
 }
-

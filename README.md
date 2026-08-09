@@ -1,6 +1,15 @@
-# KoreGastro Admin Portal
+# ChefOS Control Center
 
-Aplicação independente para operar o painel administrativo do KoreGastro. Ela reutiliza o mesmo projeto Supabase do sistema atual, mas separa o frontend e as operações administrativas em um novo deploy Vercel.
+Aplicação independente para operar o painel administrativo do ChefOS. Ela reutiliza o mesmo projeto Supabase do sistema atual, mas separa o frontend e as operações administrativas em um novo deploy Vercel.
+
+## Centro de controle
+
+- painel executivo com MRR, ARR, renovações, inadimplência e alertas operacionais;
+- gestão de assinaturas com filtros, troca de plano, status e vencimento;
+- central de suporte com fila, prioridade, histórico de conversa e resolução;
+- visão detalhada de clientes, lojas, atividade e cardápios;
+- exportação CSV de clientes e assinaturas;
+- onboarding guiado, catálogo de planos, saúde, auditoria e acessos administrativos.
 
 ## O que foi extraído
 
