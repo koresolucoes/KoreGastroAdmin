@@ -52,7 +52,7 @@ const ROUTE_CAPABILITIES = Object.freeze({
 
 function config() {
   const url = process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey = process.env.SUPABASE_SECRET_KEY;
   if (!url || !serviceKey) {
     const error = new Error('Configuração do Supabase ausente no servidor.');
     error.status = 500;

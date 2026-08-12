@@ -57,9 +57,18 @@ for (const marker of ['invite-password', '/factors/', 'challenge_id', 'mfaMode']
 }
 
 const adminSource = await readFile('api/_lib/admin.js', 'utf8');
+const healthSource = await readFile('api/admin/health.js', 'utf8');
 const accessSource = await readFile('api/admin/administrators.js', 'utf8');
 for (const marker of ['access.root', 'ADMIN_ENFORCE_MFA', 'admin_audit_events', 'CAPABILITY_REQUIRED']) {
   if (!`${adminSource}\n${accessSource}`.includes(marker)) throw new Error(`Fundação de segurança incompleta: ${marker}`);
+}
+
+const legacyServiceRoleName = ['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_');
+if (adminSource.includes(legacyServiceRoleName) || healthSource.includes(legacyServiceRoleName)) {
+  throw new Error('O Admin ainda depende da chave service_role legada.');
+}
+if (!adminSource.includes('process.env.SUPABASE_SECRET_KEY') || !healthSource.includes('SUPABASE_SECRET_KEY')) {
+  throw new Error('O Admin deve exigir SUPABASE_SECRET_KEY no backend e no health check.');
 }
 
 const migrationSource = await readFile('supabase/migrations/202608090001_admin_control_center.sql', 'utf8');

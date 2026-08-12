@@ -90,7 +90,7 @@ export default async function handler(req, res) {
       { latencyMs: byName.auth.latencyMs }
     ));
 
-    const requiredEnvironment = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
+    const requiredEnvironment = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY'];
     const recommendedEnvironment = ['ADMIN_APP_URL', 'ROOT_ADMIN_EMAILS'];
     const missingRequired = requiredEnvironment.filter((name) => !process.env[name]);
     const missingRecommended = recommendedEnvironment.filter((name) => !process.env[name]);
