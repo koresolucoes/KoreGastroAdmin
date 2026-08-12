@@ -61,7 +61,7 @@ As rotas legadas continuam disponíveis por compatibilidade: `/api/v2/admin/*` a
 ## Segurança aplicada na separação
 
 - O browser recebe somente a URL do Supabase e a chave pública (`anon`).
-- A chave `SUPABASE_SERVICE_ROLE_KEY` fica exclusivamente nas funções Vercel.
+- A chave `SUPABASE_SECRET_KEY` fica exclusivamente nas funções Vercel.
 - Todas as rotas administrativas validam o JWT e confirmam o e-mail na tabela `system_admins`.
 - `provision-tenant`, que no projeto original não validava um administrador, agora exige essa validação.
 - Entradas administrativas são validadas por UUID, enum e tamanho antes de acessar o banco.
