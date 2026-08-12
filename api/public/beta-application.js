@@ -22,7 +22,8 @@ export default async function handler(req, res) {
     const payload = await bodyOf(req);
     if (cleanText(payload.website, 200)) return reply(res, 202, { received: true });
     const startedAt = Number(payload.startedAt || 0);
-    if (startedAt && Date.now() - startedAt < 2500) return reply(res, 429, { error: 'Envio rápido demais. Tente novamente.' });
+    const elapsed = Date.now() - startedAt;
+    if (startedAt && elapsed >= 0 && elapsed < 2500) return reply(res, 429, { error: 'Envio rápido demais. Tente novamente.' });
 
     const name = cleanText(payload.name || payload.nome, 120);
     const restaurantName = cleanText(payload.restaurantName || payload.nome_restaurante, 160);
