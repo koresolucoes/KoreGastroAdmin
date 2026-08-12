@@ -15,7 +15,7 @@ export const ROLE_DEFINITIONS = Object.freeze({
       'dashboard.read', 'customers.read', 'subscriptions.read', 'subscriptions.manage',
       'support.read', 'support.manage', 'plans.read', 'plans.manage', 'catalog.read',
       'catalog.manage', 'onboarding.manage', 'health.read', 'health.run', 'audit.read',
-      'audit.export', 'access.read', 'access.manage'
+      'audit.export', 'access.read', 'access.manage', 'beta.read', 'beta.manage'
     ]
   },
   finance: {
@@ -26,7 +26,7 @@ export const ROLE_DEFINITIONS = Object.freeze({
   support: {
     label: 'Suporte',
     description: 'Clientes, chamados e contexto de assinaturas.',
-    capabilities: ['dashboard.read', 'customers.read', 'subscriptions.read', 'support.read', 'support.manage', 'health.read', 'audit.read']
+    capabilities: ['dashboard.read', 'customers.read', 'subscriptions.read', 'support.read', 'support.manage', 'health.read', 'audit.read', 'beta.read', 'beta.manage']
   },
   auditor: {
     label: 'Auditor',
@@ -47,7 +47,8 @@ const ROUTE_CAPABILITIES = Object.freeze({
   'provision-tenant': { POST: 'onboarding.manage' },
   health: { GET: 'health.read', POST: 'health.run' },
   logs: { GET: 'audit.read' },
-  administrators: { GET: 'access.read', POST: 'access.manage', PUT: 'access.manage', PATCH: 'access.manage', DELETE: 'access.manage' }
+  administrators: { GET: 'access.read', POST: 'access.manage', PUT: 'access.manage', PATCH: 'access.manage', DELETE: 'access.manage' },
+  'beta-applications': { GET: 'beta.read', PATCH: 'beta.manage', POST: 'beta.manage' }
 });
 
 function config() {
