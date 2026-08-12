@@ -33,6 +33,8 @@
     adminMeta: null,
     health: null,
     logs: null,
+    betaApplications: null,
+    betaSummary: null,
     notice: null,
     modal: null,
     sidebarOpen: false,
@@ -47,7 +49,7 @@
   const navigation = [
     { label: 'Operação', items: [
       ['overview', 'Visão geral', '⌂'], ['subscriptions', 'Assinaturas', '◎'],
-      ['tenants', 'Clientes', '◫'], ['support', 'Suporte', '✦']
+      ['tenants', 'Clientes', '◫'], ['beta', 'Programa beta', '★'], ['support', 'Suporte', '✦']
     ] },
     { label: 'Produto', items: [
       ['plans', 'Planos', '◇'], ['catalog', 'Cardápios', '≡'], ['provision', 'Onboarding', '+']
@@ -355,6 +357,11 @@
       state.adminMeta = access.meta || null;
     }
     if (section === 'health' && (force || !state.health)) state.health = await api('/api/admin/health');
+    if (section === 'beta' && (force || !state.betaApplications)) {
+      const betaPayload = await api('/api/admin/beta-applications');
+      state.betaApplications = betaPayload.data || [];
+      state.betaSummary = betaPayload.summary || {};
+    }
     if (section === 'logs' && (force || !state.logs)) {
       const filters = state.filters;
       const query = new URLSearchParams({
@@ -701,8 +708,18 @@
     </section>`;
   }
 
+  function beta() {
+    const labels = { new: 'Nova', review: 'Em análise', contact: 'Contato', interview: 'Entrevista', approved: 'Aprovada', onboarding: 'Onboarding', active: 'Beta ativo', completed: 'Concluída', converted: 'Convertida', closed: 'Encerrada' };
+    const stages = Object.keys(labels);
+    const rows = state.betaApplications || [];
+    return `<section class='page'>${pageHeader('PARCEIROS FUNDADORES', 'Candidaturas do beta', 'Acompanhe cada restaurante desde a candidatura até o início do programa.', `<button class='secondary' data-action='reload-beta'>↻ Atualizar</button>`)}
+      <div class='summary-strip'>${['new','review','contact','interview','approved','onboarding','active'].map((key) => `<div><span>${labels[key]}</span><strong>${state.betaSummary?.[key] || 0}</strong></div>`).join('')}</div>
+      <div class='panel table-wrap'><table><thead><tr><th>Restaurante</th><th>Responsável</th><th>Contato</th><th>Etapa</th><th>Entrada</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.restaurant_name)}</strong><small>${escape(item.establishment_type || item.restaurant_size || 'Perfil não informado')}</small></td><td><strong>${escape(item.name)}</strong><small>${item.consent_marketing ? 'Aceitou comunicações' : 'Somente comunicações do programa'}</small></td><td><strong>${escape(item.email)}</strong><small>${escape(item.phone || 'Sem telefone')}</small></td><td><select data-action='beta-status' data-id='${escape(item.id)}'>${stages.map((key) => `<option value='${key}' ${item.status === key ? 'selected' : ''}>${labels[key]}</option>`).join('')}</select></td><td><strong>${day(item.submitted_at)}</strong><small>${relative(item.submitted_at)}</small></td><td>${['approved','onboarding'].includes(item.status) && !item.participant ? `<button class='row-action' data-action='convert-beta' data-id='${escape(item.id)}'>Criar participante</button>` : item.participant ? `<span class='health-signal success'><i></i>Participante</span>` : ''}</td></tr>`).join('') || `<tr><td colspan='6' class='empty'>Nenhuma candidatura recebida ainda.</td></tr>`}</tbody></table></div>
+    </section>`;
+  }
+
   function activePage() {
-    const pages = { overview, subscriptions, tenants, support, plans, catalog, provision, health, logs, administrators };
+    const pages = { overview, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
     return pages[state.section]();
   }
 
@@ -1031,6 +1048,11 @@
       return openSection(target.dataset.section);
     }
     if (action === 'reload-logs') { state.logs = null; state.loading = true; render(); await loadSection('logs', true); state.loading = false; render(); return; }
+    if (action === 'reload-beta') { state.betaApplications = null; state.loading = true; render(); await loadSection('beta', true); state.loading = false; render(); return; }
+    if (action === 'convert-beta') {
+      await api('/api/admin/beta-applications', { method: 'POST', body: { id: target.dataset.id } });
+      await loadSection('beta', true); render(); showNotice('Participante criado e movido para onboarding.'); return;
+    }
     if (action === 'export-audit') { await downloadAuditCsv(); return; }
     if (action === 'audit-page') {
       state.filters.auditPage = Number(target.dataset.page || 1);
@@ -1070,6 +1092,11 @@
   });
 
   document.addEventListener('change', (event) => safe(async () => {
+    const betaStatus = event.target.closest('[data-action="beta-status"]');
+    if (betaStatus) {
+      await api('/api/admin/beta-applications', { method: 'PATCH', body: { id: betaStatus.dataset.id, status: betaStatus.value } });
+      await loadSection('beta', true); render(); showNotice('Etapa atualizada com auditoria.'); return;
+    }
     const permission = event.target.closest('input[type="checkbox"][name="permissions"]');
     if (permission) { updatePermissionSummary(permission.closest('form')); return; }
     const filter = event.target.closest('[data-filter]');

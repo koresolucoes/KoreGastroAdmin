@@ -23,6 +23,9 @@ const required = [
   'api/admin/administrators.js',
   'api/admin/health.js',
   'api/admin/logs.js',
+  'api/admin/beta-applications.js',
+  'api/public/beta-application.js',
+  'supabase/migrations/202608120001_beta_minimum_flow.sql',
   'supabase/migrations/202608090001_admin_control_center.sql'
 ];
 
@@ -51,6 +54,7 @@ for (const endpoint of ['/api/admin/customers', '/api/admin/dashboard', '/api/ad
 for (const endpoint of ['/api/admin/administrators', '/api/admin/health', '/api/admin/logs']) {
   if (!appSource.includes(endpoint)) throw new Error(`Frontend não consome o endpoint de controle ${endpoint}`);
 }
+if (!appSource.includes('/api/admin/beta-applications')) throw new Error('Frontend não consome o pipeline mínimo do beta.');
 
 for (const marker of ['invite-password', '/factors/', 'challenge_id', 'mfaMode']) {
   if (!appSource.includes(marker)) throw new Error(`Fluxo de convite/MFA incompleto: ${marker}`);
