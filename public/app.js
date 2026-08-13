@@ -35,6 +35,9 @@
     logs: null,
     betaApplications: null,
     betaSummary: null,
+    workCards: null,
+    workMeta: null,
+    workView: 'radar',
     notice: null,
     modal: null,
     sidebarOpen: false,
@@ -42,13 +45,15 @@
     filters: {
       customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active',
       catalog: '', catalogCategory: 'all', catalogStatus: 'all', auditQuery: '', auditCategory: 'all',
-      auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1
+      auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1,
+      betaQuery: '', betaStatus: 'all', betaAttention: 'all', workQuery: '', workOwner: 'all'
     }
   };
+  let draggedWorkKey = '';
 
   const navigation = [
     { label: 'Operação', items: [
-      ['overview', 'Visão geral', '⌂'], ['subscriptions', 'Assinaturas', '◎'],
+      ['overview', 'Visão geral', '⌂'], ['workboard', 'Kanban operacional', '▦'], ['subscriptions', 'Assinaturas', '◎'],
       ['tenants', 'Clientes', '◫'], ['beta', 'Programa beta', '★'], ['support', 'Suporte', '✦']
     ] },
     { label: 'Produto', items: [
@@ -77,7 +82,18 @@
   const initials = (value = '') => value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'C';
   const normalize = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const includes = (haystack, needle) => normalize(haystack).includes(normalize(needle));
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const BETA_STAGE_LABELS = { new: 'Nova', review: 'Em análise', contact: 'Contato', interview: 'Entrevista', approved: 'Aprovada', onboarding: 'Onboarding', active: 'Beta ativo', completed: 'Concluída', converted: 'Convertida', closed: 'Encerrada' };
+  const BETA_STAGES = Object.keys(BETA_STAGE_LABELS);
+  const WORK_SOURCE_LABELS = { support: 'Suporte', beta: 'Programa beta' };
+  const SUPPORT_STATUS_LABELS = { open: 'Aberto', in_progress: 'Em atendimento', resolved: 'Resolvido', closed: 'Fechado' };
+  const workStatusLabel = (source, value) => (source === 'support' ? SUPPORT_STATUS_LABELS : BETA_STAGE_LABELS)[value] || value;
   const toInputDate = (value) => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toISOString().slice(0, 10) : '';
+  const toInputDateTime = (value) => {
+    if (!value || Number.isNaN(new Date(value).getTime())) return '';
+    const date = new Date(value);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
   const can = (capability) => Boolean(state.user?.capabilities?.includes('*') || state.user?.capabilities?.includes(capability));
   const roleLabel = (role) => ({ owner: 'Proprietário', platform_admin: 'Administrador', finance: 'Financeiro', support: 'Suporte', auditor: 'Auditor' }[role] || role || 'Administrador');
   const accessStatusLabel = (value) => ({ invited: 'Convite pendente', active: 'Ativo', suspended: 'Suspenso', revoked: 'Revogado' }[value] || value || 'Desconhecido');
@@ -174,6 +190,48 @@
     const type = ['urgent', 'urgente'].includes(normalized) ? 'urgent' : ['high', 'alta'].includes(normalized) ? 'high' : 'normal';
     const label = type === 'urgent' ? 'Urgente' : type === 'high' ? 'Alta' : value || 'Normal';
     return `<span class="priority priority-${type}">${escape(label)}</span>`;
+  }
+
+  function betaRemainingDays(participant) {
+    if (!participant?.beta_ends_at) return null;
+    return Math.ceil((new Date(participant.beta_ends_at).getTime() - Date.now()) / DAY_MS);
+  }
+
+  function betaParticipantStatusSignal(status) {
+    const labels = { onboarding: 'Onboarding', active: 'Beta ativo', completed: 'Concluído', converted: 'Convertido', closed: 'Encerrado' };
+    const tone = status === 'onboarding' ? 'warning' : status === 'closed' ? 'neutral' : 'success';
+    return `<span class="health-signal ${tone}"><i></i>${escape(labels[status] || 'Onboarding')}</span>`;
+  }
+
+  function betaStageSignal(stage) {
+    const tone = ['approved', 'active', 'completed', 'converted'].includes(stage) ? 'success' : ['closed'].includes(stage) ? 'neutral' : ['contact', 'interview', 'onboarding'].includes(stage) ? 'warning' : '';
+    return `<span class="health-signal ${tone}"><i></i>${escape(BETA_STAGE_LABELS[stage] || stage || 'Nova')}</span>`;
+  }
+
+  function betaLatestEvent(application) {
+    return [...(application?.events || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+  }
+
+  function betaNeedsAttention(application) {
+    if (['converted', 'closed'].includes(application?.status)) return false;
+    const reference = betaLatestEvent(application)?.created_at || application?.updated_at || application?.submitted_at;
+    return reference && Date.now() - new Date(reference).getTime() >= 3 * DAY_MS;
+  }
+
+  function whatsappUrl(phone) {
+    let digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+    return digits ? `https://wa.me/${digits}` : '';
+  }
+
+  function betaParticipantHealthSignal(participant) {
+    if (!participant?.activated_at) return '<span class="health-signal warning"><i></i>Aguardando ativação</span>';
+    const remaining = betaRemainingDays(participant);
+    if (remaining === null) return '<span class="health-signal warning"><i></i>Sem data de encerramento</span>';
+    if (remaining < 0) return `<span class="health-signal danger"><i></i>Beta encerrado há ${Math.abs(remaining)} dia(s)</span>`;
+    if (remaining <= 7) return `<span class="health-signal danger"><i></i>${remaining} dia(s) restantes</span>`;
+    if (remaining <= 21) return `<span class="health-signal warning"><i></i>${remaining} dia(s) restantes</span>`;
+    return `<span class="health-signal success"><i></i>${remaining} dia(s) restantes</span>`;
   }
 
   function showNotice(text, type = 'success') {
@@ -297,7 +355,7 @@
       });
     } finally {
       sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null });
+      Object.assign(state, { token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null, betaApplications: null, betaSummary: null, workCards: null, workMeta: null, modal: null });
       render();
     }
   }
@@ -362,6 +420,11 @@
       state.betaApplications = betaPayload.data || [];
       state.betaSummary = betaPayload.summary || {};
     }
+    if (section === 'workboard' && (force || !state.workCards)) {
+      const board = await api('/api/admin/work-board');
+      state.workCards = board.cards || [];
+      state.workMeta = board.meta || {};
+    }
     if (section === 'logs' && (force || !state.logs)) {
       const filters = state.filters;
       const query = new URLSearchParams({
@@ -380,7 +443,7 @@
 
   function loginView() {
     return `<section class="login-shell">
-      <div class="login-brand"><span class="brand-mark">C</span><strong>ChefOS</strong><small>Control Center</small></div>
+      <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><strong>ChefOS</strong><small>Control Center</small></div>
       <form class="login-card" data-form="login">${authNotice()}
         <p class="eyebrow">ACESSO ADMINISTRATIVO</p>
         <h1>Bem-vindo ao centro de comando.</h1>
@@ -394,12 +457,12 @@
   }
 
   function inviteView() {
-    return `<section class='login-shell invite-acceptance'><div class='login-brand'><span class='brand-mark'>C</span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card' data-form='invite-password'>${authNotice()}<p class='eyebrow'>CONVITE ADMINISTRATIVO</p><h1>Proteja seu novo acesso.</h1><p class='muted'>Defina uma senha forte para concluir o convite e entrar no centro de controle.</p><label>Nova senha<input name='password' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Mínimo de 10 caracteres' /></label><label>Confirmar senha<input name='confirmation' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Repita a senha' /></label><div class='login-security'><span>✓</span><p><strong>Ativação auditada</strong><small>A conta só será ativada após a confirmação do e-mail.</small></p></div><button class='primary wide-button' type='submit'>Aceitar convite e entrar →</button></form></section>`;
+    return `<section class='login-shell invite-acceptance'><div class='login-brand'><span class='brand-mark' aria-hidden='true'></span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card' data-form='invite-password'>${authNotice()}<p class='eyebrow'>CONVITE ADMINISTRATIVO</p><h1>Proteja seu novo acesso.</h1><p class='muted'>Defina uma senha forte para concluir o convite e entrar no centro de controle.</p><label>Nova senha<input name='password' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Mínimo de 10 caracteres' /></label><label>Confirmar senha<input name='confirmation' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Repita a senha' /></label><div class='login-security'><span>✓</span><p><strong>Ativação auditada</strong><small>A conta só será ativada após a confirmação do e-mail.</small></p></div><button class='primary wide-button' type='submit'>Aceitar convite e entrar →</button></form></section>`;
   }
 
   function mfaView() {
     const enrollment = state.mfaMode?.type === 'enroll';
-    return `<section class='login-shell mfa-shell'><div class='login-brand'><span class='brand-mark'>C</span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card mfa-card' data-form='mfa'>${authNotice()}<p class='eyebrow'>SEGUNDO FATOR</p><h1>${enrollment ? 'Proteja sua conta administrativa.' : 'Confirme que é você.'}</h1><p class='muted'>${enrollment ? 'Escaneie o QR Code no Google Authenticator, Microsoft Authenticator, 1Password ou aplicativo compatível.' : 'Abra seu aplicativo autenticador e informe o código atual.'}</p>${enrollment ? `<div class='mfa-setup'><img src='${escape(state.mfaMode.qrCode)}' alt='QR Code para cadastrar o segundo fator' /><div><small>CHAVE MANUAL</small><code>${escape(state.mfaMode.secret)}</code><button type='button' class='text-button' data-action='copy-mfa-secret'>Copiar chave</button></div></div>` : `<div class='mfa-prompt'><span>⌁</span><div><strong>Autenticador cadastrado</strong><small>O código muda a cada 30 segundos.</small></div></div>`}<label>Código de 6 dígitos<input name='code' type='text' inputmode='numeric' autocomplete='one-time-code' required minlength='6' maxlength='6' pattern='[0-9]{6}' placeholder='000000' /></label><button class='primary wide-button' type='submit'>${enrollment ? 'Ativar MFA e entrar →' : 'Verificar e entrar →'}</button><button class='quiet mfa-logout' type='button' data-action='logout'>Sair e usar outra conta</button></form></section>`;
+    return `<section class='login-shell mfa-shell'><div class='login-brand'><span class='brand-mark' aria-hidden='true'></span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card mfa-card' data-form='mfa'>${authNotice()}<p class='eyebrow'>SEGUNDO FATOR</p><h1>${enrollment ? 'Proteja sua conta administrativa.' : 'Confirme que é você.'}</h1><p class='muted'>${enrollment ? 'Escaneie o QR Code no Google Authenticator, Microsoft Authenticator, 1Password ou aplicativo compatível.' : 'Abra seu aplicativo autenticador e informe o código atual.'}</p>${enrollment ? `<div class='mfa-setup'><img src='${escape(state.mfaMode.qrCode)}' alt='QR Code para cadastrar o segundo fator' /><div><small>CHAVE MANUAL</small><code>${escape(state.mfaMode.secret)}</code><button type='button' class='text-button' data-action='copy-mfa-secret'>Copiar chave</button></div></div>` : `<div class='mfa-prompt'><span>⌁</span><div><strong>Autenticador cadastrado</strong><small>O código muda a cada 30 segundos.</small></div></div>`}<label>Código de 6 dígitos<input name='code' type='text' inputmode='numeric' autocomplete='one-time-code' required minlength='6' maxlength='6' pattern='[0-9]{6}' placeholder='000000' /></label><button class='primary wide-button' type='submit'>${enrollment ? 'Ativar MFA e entrar →' : 'Verificar e entrar →'}</button><button class='quiet mfa-logout' type='button' data-action='logout'>Sair e usar outra conta</button></form></section>`;
   }
 
   function missingConfigView() {
@@ -412,7 +475,7 @@
       return `<button class="nav-item ${state.section === key ? 'active' : ''}" data-action="section" data-section="${key}"><span class="nav-glyph" aria-hidden="true">${glyph}</span><span>${label}</span>${badge}</button>`;
     }).join('')}</div>`).join('');
     return `<aside class="sidebar ${state.sidebarOpen ? 'open' : ''}" aria-label="Navegação principal">
-      <div class="brand"><span class="brand-mark">C</span><span>ChefOS<small>Control Center</small></span><button class="icon-button sidebar-close" data-action="toggle-sidebar" aria-label="Fechar menu">×</button></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>ChefOS<small>Control Center</small></span><button class="icon-button sidebar-close" data-action="toggle-sidebar" aria-label="Fechar menu">×</button></div>
       <nav>${groups}</nav>
       <div class="sidebar-footer">
         <div class="system-pill"><i></i><span><strong>Sistema operacional</strong><small>Todos os serviços ativos</small></span></div>
@@ -538,6 +601,58 @@
         ${rows.map((tenant) => { const subscription = subscriptionOf(tenant); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.email)}</small></span></button></td><td><strong>${tenant.stores?.length || 0} operação(ões)</strong><small>${escape(tenant.stores?.map((store) => store.name).join(', ') || 'Nenhuma loja')}</small></td><td>${onboarding(tenant)}</td><td>${subscription ? status(subscription.status) : status('unknown')}<small>${subscription ? escape(planById(subscription.plan_id)?.name || 'Plano não identificado') : 'Requer configuração'}</small></td><td><strong>${tenant.support?.openTickets || 0} aberto(s)</strong><small>${tenant.support?.urgentTickets || 0} prioritário(s)</small></td><td><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong><small>${date(tenant.last_sign_in_at || tenant.updated_at)}</small></td><td><button class="row-action" data-action="open-tenant" data-id="${accountId}">Visão 360º</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhum cliente encontrado.</td></tr>'}
       </tbody></table></div>
       ${state.customerMeta ? `<p class="dataset-meta">Exibindo ${state.customerMeta.returned || rows.length} de ${state.customerMeta.total || rows.length} contas retornadas pela API administrativa.</p>` : ''}
+    </section>`;
+  }
+
+  function workLaneTarget(view, lane) {
+    if (view === 'support') return lane;
+    if (view === 'beta') return { intake: 'new', contact: 'contact', selection: 'approved', onboarding: 'onboarding', active: 'active', done: 'completed' }[lane];
+    return null;
+  }
+
+  function filteredWorkCards() {
+    const query = state.filters.workQuery;
+    const owner = state.filters.workOwner;
+    return (state.workCards || []).filter((card) => {
+      const matchesView = state.workView === 'radar' || card.source === state.workView;
+      const matchesQuery = !query || includes(`${card.title} ${card.subtitle} ${card.detail} ${card.assignedTo || ''}`, query);
+      const matchesOwner = owner === 'all' || (owner === 'mine' ? normalize(card.assignedTo) === normalize(state.user?.email) : !card.assignedTo);
+      return matchesView && matchesQuery && matchesOwner;
+    });
+  }
+
+  function workCard(card) {
+    const canMove = can(card.source === 'support' ? 'support.manage' : 'beta.manage');
+    const reasons = (card.reasons || []).slice(0, 2);
+    const dueClass = card.dueAt && new Date(card.dueAt) < new Date() ? 'overdue' : '';
+    return `<article class='work-card source-${escape(card.source)} ${card.completed ? 'completed' : ''}' draggable='${canMove ? 'true' : 'false'}' data-work-key='${escape(card.key)}'><header><span class='work-source'>${escape(WORK_SOURCE_LABELS[card.source])}</span><strong class='attention-score score-${card.attentionScore >= 80 ? 'critical' : card.attentionScore >= 50 ? 'high' : 'normal'}' title='Pontuação de atenção'>${card.attentionScore}</strong></header><button class='work-card-main' data-action='open-work-item' data-key='${escape(card.key)}'><h3>${escape(card.title)}</h3><p>${escape(card.subtitle)}</p><small>${escape(card.detail || 'Sem detalhe adicional')}</small></button><div class='work-card-signals'>${reasons.map((reason) => `<span>${escape(reason)}</span>`).join('') || `<span class='quiet-signal'>Acompanhamento em dia</span>`}</div><footer><span class='work-owner ${card.assignedTo ? '' : 'unassigned'}'>${card.assignedTo ? `◎ ${escape(card.assignedTo.split('@')[0])}` : '○ Sem responsável'}</span>${card.dueAt ? `<time class='${dueClass}'>${day(card.dueAt)}</time>` : `<time>Sem prazo</time>`}<button class='icon-button small-work-action' data-action='organize-work' data-key='${escape(card.key)}' aria-label='Organizar card'>•••</button></footer></article>`;
+  }
+
+  function workboard() {
+    const meta = state.workMeta || { summary: {}, availableBoards: [] };
+    const summary = meta.summary || {};
+    const available = new Set(meta.availableBoards || []);
+    if (state.workView !== 'radar' && !available.has(state.workView)) state.workView = 'radar';
+    const laneSets = {
+      radar: [
+        ['critical', 'Críticos agora', 'Ação imediata'], ['today', 'Para hoje', 'Prioridades do dia'],
+        ['week', 'Esta semana', 'Planejamento próximo'], ['waiting', 'Aguardando', 'Sem urgência imediata'], ['done', 'Concluídos', 'Histórico recente']
+      ],
+      support: [['open', 'Aberto', 'Aguardando atendimento'], ['in_progress', 'Em atendimento', 'Equipe trabalhando'], ['resolved', 'Resolvido', 'Solução entregue'], ['closed', 'Fechado', 'Atendimento encerrado']],
+      beta: [['intake', 'Entrada', 'Novas e em análise'], ['contact', 'Contato', 'Contato e entrevista'], ['selection', 'Selecionados', 'Aprovados'], ['onboarding', 'Onboarding', 'Preparando a operação'], ['active', 'Acompanhamento', 'Beta em uso real'], ['done', 'Finalizados', 'Concluídos ou encerrados']]
+    };
+    const cards = filteredWorkCards();
+    const lanes = laneSets[state.workView];
+    const laneOf = (card) => state.workView === 'radar' ? card.radarLane : card.nativeLane;
+    const tabs = [['radar', 'Radar inteligente'], ...(available.has('support') ? [['support', 'Suporte']] : []), ...(available.has('beta') ? [['beta', 'Programa beta']] : [])];
+    return `<section class='page work-center'>${pageHeader('OPERAÇÃO UNIFICADA', 'Kanban operacional', 'Priorize o que exige atenção e trabalhe suporte e beta sem perder o contexto de cada módulo.', `<button class='secondary' data-action='reload-workboard'>↻ Atualizar quadro</button>`)}
+      <div class='summary-strip work-summary'>${[
+        ['Itens ativos', summary.active || 0, 'nos dois fluxos'], ['Críticos agora', summary.critical || 0, 'exigem ação imediata'],
+        ['Para hoje', summary.dueToday || 0, 'prioridades do dia'], ['Sem responsável', summary.unassigned || 0, 'precisam de atribuição']
+      ].map(([label, value, helper]) => `<div><span>${label}</span><strong>${value}</strong><small>${helper}</small></div>`).join('')}</div>
+      <div class='work-controls'><div class='work-tabs'>${tabs.map(([key, label]) => `<button class='${state.workView === key ? 'active' : ''}' data-action='work-view' data-view='${key}'>${label}</button>`).join('')}</div><div class='work-filters'><div class='search-field'><span>⌕</span><input data-search='workQuery' value='${escape(state.filters.workQuery)}' placeholder='Buscar card, cliente ou responsável' /></div><select data-filter='workOwner' aria-label='Filtrar responsável'><option value='all'>Todos os responsáveis</option><option value='mine' ${state.filters.workOwner === 'mine' ? 'selected' : ''}>Minha fila</option><option value='unassigned' ${state.filters.workOwner === 'unassigned' ? 'selected' : ''}>Sem responsável</option></select></div></div>
+      <div class='work-intelligence'><i>✦</i><span><strong>Prioridade explicável</strong><small>A pontuação considera urgência, tempo sem movimentação, prazo, etapa e responsável. O ChefOS nunca muda um card sozinho.</small></span></div>
+      <div class='kanban-board board-${state.workView}'>${lanes.map(([key, label, helper]) => { const laneCards = cards.filter((card) => laneOf(card) === key).sort((a, b) => state.workView === 'radar' ? b.attentionScore - a.attentionScore : a.position - b.position || b.attentionScore - a.attentionScore); return `<section class='kanban-lane' ${state.workView === 'radar' ? '' : `data-drop-lane='${key}'`}><header><span><h2>${label}</h2><small>${helper}</small></span><b>${laneCards.length}</b></header><div class='kanban-cards'>${laneCards.map(workCard).join('') || `<div class='kanban-empty'><i>✓</i><span>Nenhum item nesta coluna</span></div>`}</div></section>`; }).join('')}</div>
     </section>`;
   }
 
@@ -709,17 +824,38 @@
   }
 
   function beta() {
-    const labels = { new: 'Nova', review: 'Em análise', contact: 'Contato', interview: 'Entrevista', approved: 'Aprovada', onboarding: 'Onboarding', active: 'Beta ativo', completed: 'Concluída', converted: 'Convertida', closed: 'Encerrada' };
-    const stages = Object.keys(labels);
-    const rows = state.betaApplications || [];
-    return `<section class='page'>${pageHeader('PARCEIROS FUNDADORES', 'Candidaturas do beta', 'Acompanhe cada restaurante desde a candidatura até o início do programa.', `<button class='secondary' data-action='reload-beta'>↻ Atualizar</button>`)}
-      <div class='summary-strip'>${['new','review','contact','interview','approved','onboarding','active'].map((key) => `<div><span>${labels[key]}</span><strong>${state.betaSummary?.[key] || 0}</strong></div>`).join('')}</div>
-      <div class='panel table-wrap'><table><thead><tr><th>Restaurante</th><th>Responsável</th><th>Contato</th><th>Etapa</th><th>Entrada</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.restaurant_name)}</strong><small>${escape(item.establishment_type || item.restaurant_size || 'Perfil não informado')}</small></td><td><strong>${escape(item.name)}</strong><small>${item.consent_marketing ? 'Aceitou comunicações' : 'Somente comunicações do programa'}</small></td><td><strong>${escape(item.email)}</strong><small>${escape(item.phone || 'Sem telefone')}</small></td><td><select data-action='beta-status' data-id='${escape(item.id)}'>${stages.map((key) => `<option value='${key}' ${item.status === key ? 'selected' : ''}>${labels[key]}</option>`).join('')}</select></td><td><strong>${day(item.submitted_at)}</strong><small>${relative(item.submitted_at)}</small></td><td>${['approved','onboarding'].includes(item.status) && !item.participant ? `<button class='row-action' data-action='convert-beta' data-id='${escape(item.id)}'>Criar participante</button>` : item.participant ? `<span class='health-signal success'><i></i>Participante</span>` : ''}</td></tr>`).join('') || `<tr><td colspan='6' class='empty'>Nenhuma candidatura recebida ainda.</td></tr>`}</tbody></table></div>
+    const allRows = state.betaApplications || [];
+    const query = state.filters.betaQuery;
+    const rows = allRows.filter((item) => {
+      const matchesQuery = !query || includes(`${item.restaurant_name} ${item.name} ${item.email} ${item.phone || ''}`, query);
+      const matchesStatus = state.filters.betaStatus === 'all' || item.status === state.filters.betaStatus;
+      const matchesAttention = state.filters.betaAttention === 'all' || (state.filters.betaAttention === 'attention' ? betaNeedsAttention(item) : !betaNeedsAttention(item));
+      return matchesQuery && matchesStatus && matchesAttention;
+    });
+    const participants = allRows.filter((item) => item.participant);
+    const activeParticipants = participants.filter((item) => item.participant?.status === 'active').length;
+    const onboardingParticipants = participants.filter((item) => item.participant?.status === 'onboarding').length;
+    const awaitingReview = allRows.filter((item) => ['new', 'review'].includes(item.status)).length;
+    const attentionCount = allRows.filter(betaNeedsAttention).length;
+    const endingSoon = participants.filter((item) => {
+      const remaining = betaRemainingDays(item.participant);
+      return remaining !== null && remaining >= 0 && remaining <= 21;
+    }).length;
+    return `<section class='page beta-center'>${pageHeader('PARCEIROS FUNDADORES', 'Operação do beta', 'Organize a seleção, registre cada contato e acompanhe os restaurantes durante os 90 dias.', `<button class='secondary' data-action='reload-beta'>↻ Atualizar</button>`)}
+      <div class='summary-strip beta-operational-summary'>${[
+        ['Aguardando triagem', awaitingReview, 'novas candidaturas ou em análise'],
+        ['Precisam de atenção', attentionCount, 'sem movimentação há 3 dias ou mais'],
+        ['Em onboarding', onboardingParticipants, 'preparando o início da operação'],
+        ['Ativos no beta', activeParticipants, 'usando o ChefOS em operação real']
+      ].map(([label, value, helper]) => `<div><span>${label}</span><strong>${value}</strong><small>${helper}</small></div>`).join('')}</div>
+      <div class='data-toolbar beta-toolbar'><div class='search-field'><span>⌕</span><input data-search='betaQuery' value='${escape(query)}' placeholder='Buscar restaurante, responsável ou contato' /></div><select data-filter='betaStatus' aria-label='Filtrar etapa'><option value='all'>Todas as etapas</option>${BETA_STAGES.map((key) => `<option value='${key}' ${state.filters.betaStatus === key ? 'selected' : ''}>${BETA_STAGE_LABELS[key]}</option>`).join('')}</select><select data-filter='betaAttention' aria-label='Filtrar atenção'><option value='all'>Todos os acompanhamentos</option><option value='attention' ${state.filters.betaAttention === 'attention' ? 'selected' : ''}>Precisam de atenção</option><option value='current' ${state.filters.betaAttention === 'current' ? 'selected' : ''}>Acompanhamento em dia</option></select><span class='result-count'>${rows.length} de ${allRows.length}</span></div>
+      <div class='panel table-wrap beta-table'><table><thead><tr><th>Restaurante</th><th>Responsável</th><th>Etapa</th><th>Última movimentação</th><th>Acompanhamento</th><th></th></tr></thead><tbody>${rows.map((item) => { const latest = betaLatestEvent(item); return `<tr><td><strong>${escape(item.restaurant_name)}</strong><small>${escape(item.establishment_type || item.restaurant_size || 'Perfil não informado')}</small></td><td><strong>${escape(item.name)}</strong><small>${escape(item.email)}${item.phone ? ` · ${escape(item.phone)}` : ''}</small></td><td>${betaStageSignal(item.status)}</td><td><strong>${day(latest?.created_at || item.updated_at || item.submitted_at)}</strong><small>${latest?.note ? escape(latest.note) : escape(BETA_STAGE_LABELS[latest?.to_status] || 'Candidatura recebida')}</small></td><td>${betaNeedsAttention(item) ? `<span class='health-signal warning'><i></i>Retomar contato</span>` : `<span class='health-signal success'><i></i>Em dia</span>`}</td><td><button class='row-action' data-action='open-beta' data-id='${escape(item.id)}'>Abrir ficha</button></td></tr>`; }).join('') || `<tr><td colspan='6' class='empty'>Nenhuma candidatura corresponde aos filtros.</td></tr>`}</tbody></table></div>
+      <div class='panel table-wrap beta-participants'><div class='panel-heading'><div><p class='eyebrow'>CICLO DE 90 DIAS</p><h2>Participantes do programa</h2><p class='muted'>Acompanhe quem está preparando a entrada, em uso real ou perto do encerramento.</p></div><span class='count-badge'>${participants.length}</span></div><table><thead><tr><th>Restaurante</th><th>Coorte</th><th>Situação</th><th>Ativação</th><th>Fim do beta</th><th>Saúde</th><th></th></tr></thead><tbody>${participants.map((item) => `<tr><td><strong>${escape(item.restaurant_name)}</strong><small>${escape(item.name)} · ${escape(item.email)}</small></td><td><strong>${escape(item.participant?.cohort || 'founders-2026')}</strong><small>Grupo do programa</small></td><td>${betaParticipantStatusSignal(item.participant?.status)}</td><td><strong>${item.participant?.activated_at ? day(item.participant.activated_at) : 'Aguardando ativação'}</strong><small>${item.participant?.activated_at ? relative(item.participant.activated_at) : 'Início operacional pendente'}</small></td><td><strong>${item.participant?.beta_ends_at ? day(item.participant.beta_ends_at) : '—'}</strong><small>${item.participant?.beta_ends_at ? relative(item.participant.beta_ends_at) : '90 dias após a ativação'}</small></td><td>${betaParticipantHealthSignal(item.participant)}</td><td><button class='row-action' data-action='open-beta' data-id='${escape(item.id)}'>Detalhes</button></td></tr>`).join('') || `<tr><td colspan='7' class='empty'>Nenhum participante criado ainda.</td></tr>`}</tbody></table></div>
     </section>`;
   }
 
   function activePage() {
-    const pages = { overview, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
+    const pages = { overview, workboard, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
     return pages[state.section]();
   }
 
@@ -784,6 +920,33 @@
     return `<div class='modal-shell drawer-shell' role='dialog' aria-modal='true' aria-labelledby='audit-event-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><aside class='detail-drawer audit-drawer'><header><div><p class='eyebrow'>EVENTO DE AUDITORIA</p><h2 id='audit-event-title'>${escape(event.actionLabel || event.action)}</h2></div><button class='icon-button' data-action='close-modal' aria-label='Fechar'>×</button></header><div class='drawer-signals'><span class='category-pill'>${escape(event.categoryLabel || event.category)}</span><span class='outcome outcome-${escape(event.outcome)}'>${escape(auditOutcomeLabel(event.outcome))}</span><span class='severity severity-${escape(event.severity)}'>${escape(event.severity)}</span></div><div class='detail-grid audit-detail-grid'><span><small>ATOR</small><strong>${escape(event.actor_email || 'Não identificado')}</strong></span><span><small>DATA E HORA</small><strong>${date(event.created_at)}</strong></span><span><small>RECURSO</small><strong>${escape(event.target_type || '—')}</strong></span><span><small>IDENTIFICADOR</small><strong>${escape(event.target_id || '—')}</strong></span><span><small>REQUISIÇÃO</small><strong>${escape(event.request_id || '—')}</strong></span><span><small>RESULTADO</small><strong>${escape(auditOutcomeLabel(event.outcome))}</strong></span></div>${event.reason ? `<section class='audit-reason'><small>MOTIVO INFORMADO</small><p>${escape(event.reason)}</p></section>` : ''}<section class='audit-diff'><div><small>ANTES</small>${event.before_state ? `<pre>${escape(prettyJson(event.before_state))}</pre>` : `<p class='empty'>Sem estado anterior.</p>`}</div><div><small>DEPOIS</small>${event.after_state ? `<pre>${escape(prettyJson(event.after_state))}</pre>` : `<p class='empty'>Sem estado posterior.</p>`}</div></section><details class='audit-metadata'><summary>Metadados técnicos</summary><pre>${escape(prettyJson(event.metadata || {}))}</pre></details></aside></div>`;
   }
 
+  function workItemModal() {
+    const card = (state.workCards || []).find((item) => item.key === state.modal?.key);
+    if (!card) return '';
+    const statuses = card.source === 'support'
+      ? ['open', 'in_progress', 'resolved', 'closed']
+      : BETA_STAGES;
+    const selectedStatus = state.modal?.targetStatus || card.status;
+    return `<div class='modal-shell' role='dialog' aria-modal='true' aria-labelledby='work-item-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><form class='modal-card work-item-modal' data-form='work-item'><header><div><p class='eyebrow'>${escape(WORK_SOURCE_LABELS[card.source])}</p><h2 id='work-item-title'>Organizar card</h2><p>${escape(card.title)} · prioridade ${card.attentionScore}</p></div><button type='button' class='icon-button' data-action='close-modal' aria-label='Fechar'>×</button></header><div class='modal-body'><input type='hidden' name='key' value='${escape(card.key)}' /><div class='work-modal-score'><strong>${card.attentionScore}</strong><span><b>Índice de atenção</b><small>${escape((card.reasons || []).join(' · ') || 'Acompanhamento em dia')}</small></span></div><label>Etapa<select name='status' required>${statuses.map((key) => `<option value='${key}' ${selectedStatus === key ? 'selected' : ''}>${escape(workStatusLabel(card.source, key))}</option>`).join('')}</select></label><label>Responsável interno<input name='assignedTo' type='email' maxlength='254' value='${escape(card.assignedTo || '')}' placeholder='administrador@chefos.online' /></label><label>Prazo para próxima ação<input name='dueAt' type='datetime-local' value='${escape(toInputDateTime(card.dueAt))}' /></label><label>Registro da movimentação<textarea name='note' maxlength='1000' placeholder='Contexto da decisão ou próximo passo${card.source === 'beta' ? ' — obrigatório ao mudar a etapa' : ''}'></textarea></label>${card.source === 'beta' ? `<div class='modal-alert'><strong>Histórico do programa</strong><p>Mudar a etapa do beta exige uma observação e registra o responsável pela decisão.</p></div>` : `<div class='secure-note'><span>✓</span><p><strong>Movimentação auditada</strong><small>A alteração de etapa, responsável e prazo ficará no histórico administrativo.</small></p></div>`}</div><footer><button type='button' class='secondary' data-action='close-modal'>Cancelar</button><button class='primary' type='submit'>Salvar no quadro</button></footer></form></div>`;
+  }
+
+  function betaApplicationModal() {
+    const application = (state.betaApplications || []).find((item) => String(item.id) === String(state.modal?.id));
+    if (!application) return '';
+    const participant = application.participant || null;
+    const events = [...(application.events || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const whatsapp = whatsappUrl(application.phone);
+    const canConvert = !participant && ['approved', 'onboarding'].includes(application.status);
+    return `<div class='modal-shell drawer-shell' role='dialog' aria-modal='true' aria-labelledby='beta-application-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><form class='detail-drawer beta-drawer' data-form='beta-application'><header><div><p class='eyebrow'>FICHA DO CANDIDATO</p><h2 id='beta-application-title'>${escape(application.restaurant_name)}</h2></div><button type='button' class='icon-button' data-action='close-modal' aria-label='Fechar'>×</button></header><input type='hidden' name='id' value='${escape(application.id)}' /><div class='drawer-title'><p>${escape(application.name)} · candidatura ${relative(application.submitted_at)}</p><div class='drawer-signals'>${betaStageSignal(application.status)}${betaNeedsAttention(application) ? `<span class='health-signal warning'><i></i>Precisa de atenção</span>` : `<span class='health-signal success'><i></i>Acompanhamento em dia</span>`}</div></div>
+      <div class='beta-contact-actions'><a class='secondary' href='mailto:${encodeURIComponent(application.email)}'>Enviar e-mail</a>${whatsapp ? `<a class='secondary' href='${escape(whatsapp)}' target='_blank' rel='noopener'>Abrir WhatsApp</a>` : ''}</div>
+      <section class='detail-grid beta-detail-grid'><span><small>RESPONSÁVEL</small><strong>${escape(application.name)}</strong></span><span><small>E-MAIL</small><strong>${escape(application.email)}</strong></span><span><small>TELEFONE</small><strong>${escape(application.phone || 'Não informado')}</strong></span><span><small>PERFIL</small><strong>${escape(application.establishment_type || application.restaurant_size || 'Não informado')}</strong></span><span><small>ORIGEM</small><strong>${escape(application.source || 'landing')}</strong></span><span><small>RESPONSÁVEL INTERNO</small><strong>${escape(application.assigned_to || 'Ainda não atribuído')}</strong></span></section>
+      <section class='beta-consent'><div><i>✓</i><span><strong>Participação no programa</strong><small>Termo ${escape(application.consent_version || 'registrado')} aceito na candidatura.</small></span></div><div class='${application.consent_marketing ? 'granted' : 'optional'}'><i>${application.consent_marketing ? '✓' : '—'}</i><span><strong>Comunicações de marketing</strong><small>${application.consent_marketing ? 'Autorizadas pelo candidato.' : 'Não autorizadas; envie somente mensagens necessárias ao beta.'}</small></span></div></section>
+      ${participant ? `<section class='beta-participant-card'><div class='panel-heading'><div><p class='eyebrow'>PARTICIPANTE</p><h3>Ciclo do beta</h3></div>${betaParticipantStatusSignal(participant.status)}</div><div class='detail-grid'><span><small>COORTE</small><strong>${escape(participant.cohort || 'founders-2026')}</strong></span><span><small>ATIVAÇÃO</small><strong>${participant.activated_at ? day(participant.activated_at) : 'Pendente'}</strong></span><span><small>ENCERRAMENTO</small><strong>${participant.beta_ends_at ? day(participant.beta_ends_at) : '90 dias após ativar'}</strong></span><span><small>SAÚDE</small><strong>${betaParticipantHealthSignal(participant)}</strong></span></div></section>` : ''}
+      <section class='beta-operation-form'><div class='panel-heading'><div><p class='eyebrow'>PRÓXIMA MOVIMENTAÇÃO</p><h3>Registrar acompanhamento</h3><p class='muted'>Toda mudança fica vinculada ao administrador responsável.</p></div></div><label>Etapa<select name='status' required>${BETA_STAGES.map((key) => `<option value='${key}' ${application.status === key ? 'selected' : ''}>${BETA_STAGE_LABELS[key]}</option>`).join('')}</select></label><label>Coorte<input name='cohort' maxlength='80' value='${escape(participant?.cohort || 'founders-2026')}' placeholder='founders-2026' /></label><label>Registro da conversa ou decisão<textarea name='note' required minlength='3' maxlength='1000' placeholder='Ex.: falei com o responsável; entrevista marcada para sexta-feira.'></textarea></label><div class='modal-alert'><strong>Quando começa o período gratuito?</strong><p>Os 90 dias começam somente ao mover um participante para “Beta ativo”. Até lá ele permanece em onboarding.</p></div></section>
+      <section class='beta-timeline'><div class='panel-heading'><div><p class='eyebrow'>HISTÓRICO</p><h3>Movimentações da candidatura</h3></div><span class='count-badge'>${events.length}</span></div>${events.map((entry) => `<article><i></i><div><strong>${entry.event_type === 'participant_created' ? 'Participante criado' : entry.event_type === 'note_added' ? 'Acompanhamento registrado' : entry.to_status ? `${BETA_STAGE_LABELS[entry.from_status] || 'Entrada'} → ${BETA_STAGE_LABELS[entry.to_status] || entry.to_status}` : 'Candidatura recebida'}</strong><p>${escape(entry.note || 'Sem observação adicional.')}</p><small>${date(entry.created_at)} · ${escape(entry.actor_email || 'sistema')}</small></div></article>`).join('') || `<p class='empty'>Nenhuma movimentação registrada.</p>`}</section>
+      <footer>${canConvert ? `<button type='button' class='secondary' data-action='convert-beta' data-id='${escape(application.id)}'>Criar participante</button>` : `<button type='button' class='secondary' data-action='close-modal'>Fechar</button>`}<button class='primary' type='submit'>Salvar acompanhamento</button></footer></form></div>`;
+  }
+
   function modalView() {
     if (!state.modal) return '';
     if (state.modal.type === 'subscription') return subscriptionModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
@@ -793,6 +956,8 @@
     if (state.modal.type === 'onboarding-success') return onboardingSuccessModal();
     if (state.modal.type === 'admin-access') return adminAccessModal();
     if (state.modal.type === 'audit-event') return auditEventModal();
+    if (state.modal.type === 'work-item') return workItemModal();
+    if (state.modal.type === 'beta-application') return betaApplicationModal();
     return '';
   }
 
@@ -948,6 +1113,33 @@
       showNotice('Acesso atualizado e registrado na auditoria.');
       return;
     }
+    if (form.dataset.form === 'work-item') {
+      const card = (state.workCards || []).find((item) => item.key === values.key);
+      if (!card) throw new Error('O card não está mais disponível. Atualize o quadro.');
+      const statusChanged = values.status !== card.status;
+      if (card.source === 'beta' && statusChanged && !String(values.note || '').trim()) throw new Error('Registre a decisão antes de mudar a etapa do beta.');
+      await api('/api/admin/work-board', { method: 'PATCH', body: {
+        source: card.source, id: card.sourceId, status: values.status,
+        assignedTo: values.assignedTo || null,
+        dueAt: values.dueAt ? new Date(values.dueAt).toISOString() : null,
+        position: Date.now(), note: values.note || null,
+        expectedUpdatedAt: card.sourceUpdatedAt
+      } });
+      state.modal = null;
+      if (card.source === 'support') state.tickets = null;
+      if (card.source === 'beta') state.betaApplications = null;
+      await loadSection('workboard', true);
+      render();
+      showNotice('Card atualizado e registrado na auditoria.');
+      return;
+    }
+    if (form.dataset.form === 'beta-application') {
+      await api('/api/admin/beta-applications', { method: 'PATCH', body: { id: values.id, status: values.status, cohort: values.cohort, note: values.note } });
+      await loadSection('beta', true);
+      render();
+      showNotice(values.status === 'active' ? 'Participante ativado; o ciclo de 90 dias começou.' : 'Acompanhamento registrado no histórico.');
+      return;
+    }
     if (form.dataset.form === 'audit-filter') {
       Object.assign(state.filters, {
         auditQuery: values.q || '', auditCategory: values.category || 'all', auditOutcome: values.outcome || 'all',
@@ -981,6 +1173,21 @@
     if (action === 'close-modal') { state.modal = null; render(); return; }
     if (action === 'manage-admin') { state.modal = { type: 'admin-access', email: target.dataset.email }; render(); return; }
     if (action === 'view-audit') { state.modal = { type: 'audit-event', id: target.dataset.id }; render(); return; }
+    if (action === 'work-view') { state.workView = target.dataset.view || 'radar'; render(); return; }
+    if (action === 'organize-work') { state.modal = { type: 'work-item', key: target.dataset.key }; render(); return; }
+    if (action === 'open-work-item') {
+      const card = (state.workCards || []).find((item) => item.key === target.dataset.key);
+      if (!card) return;
+      if (card.source === 'support') {
+        state.selectedTicketId = card.sourceId;
+        return openSection('support');
+      }
+      if (!state.betaApplications) await loadSection('beta', true);
+      state.modal = { type: 'beta-application', id: card.sourceId };
+      render();
+      return;
+    }
+    if (action === 'open-beta') { state.modal = { type: 'beta-application', id: target.dataset.id }; render(); return; }
     if (action === 'open-plan') { state.modal = { type: 'plan' }; render(); return; }
     if (action === 'edit-plan') { state.modal = { type: 'plan', id: target.dataset.id }; render(); return; }
     if (action === 'duplicate-plan') { state.modal = { type: 'plan', id: target.dataset.id, duplicate: true }; render(); return; }
@@ -1027,6 +1234,7 @@
     if (action === 'select-ticket') { state.selectedTicketId = target.dataset.id; render(); return; }
     if (action === 'open-ticket') { state.selectedTicketId = target.dataset.id; return openSection('support'); }
     if (action === 'reload-tickets') { state.loading = true; render(); await loadSection('support', true); state.loading = false; render(); return; }
+    if (action === 'reload-workboard') { state.workCards = null; state.loading = true; render(); await loadSection('workboard', true); state.loading = false; render(); return; }
     if (action === 'resolve-ticket') {
       await api('/api/admin/tickets', { method: 'PUT', body: { id: target.dataset.id, updates: { status: 'resolved' } } });
       const tickets = await api('/api/admin/tickets');
@@ -1092,11 +1300,6 @@
   });
 
   document.addEventListener('change', (event) => safe(async () => {
-    const betaStatus = event.target.closest('[data-action="beta-status"]');
-    if (betaStatus) {
-      await api('/api/admin/beta-applications', { method: 'PATCH', body: { id: betaStatus.dataset.id, status: betaStatus.value } });
-      await loadSection('beta', true); render(); showNotice('Etapa atualizada com auditoria.'); return;
-    }
     const permission = event.target.closest('input[type="checkbox"][name="permissions"]');
     if (permission) { updatePermissionSummary(permission.closest('form')); return; }
     const filter = event.target.closest('[data-filter]');
@@ -1115,6 +1318,48 @@
     await loadSection('catalog');
     state.loading = false; render();
   }));
+
+  document.addEventListener('dragstart', (event) => {
+    const card = event.target.closest('[data-work-key][draggable="true"]');
+    if (!card || state.workView === 'radar') return;
+    draggedWorkKey = card.dataset.workKey || '';
+    card.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', draggedWorkKey);
+  });
+
+  document.addEventListener('dragend', (event) => {
+    event.target.closest('[data-work-key]')?.classList.remove('dragging');
+    document.querySelectorAll('[data-drop-lane].drag-over').forEach((lane) => lane.classList.remove('drag-over'));
+    draggedWorkKey = '';
+  });
+
+  document.addEventListener('dragover', (event) => {
+    const lane = event.target.closest('[data-drop-lane]');
+    if (!lane || !draggedWorkKey || state.workView === 'radar') return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('[data-drop-lane].drag-over').forEach((item) => item !== lane && item.classList.remove('drag-over'));
+    lane.classList.add('drag-over');
+  });
+
+  document.addEventListener('dragleave', (event) => {
+    const lane = event.target.closest('[data-drop-lane]');
+    if (lane && !lane.contains(event.relatedTarget)) lane.classList.remove('drag-over');
+  });
+
+  document.addEventListener('drop', (event) => {
+    const lane = event.target.closest('[data-drop-lane]');
+    if (!lane || state.workView === 'radar') return;
+    event.preventDefault();
+    const key = draggedWorkKey || event.dataTransfer.getData('text/plain');
+    const targetStatus = workLaneTarget(state.workView, lane.dataset.dropLane);
+    document.querySelectorAll('[data-drop-lane].drag-over').forEach((item) => item.classList.remove('drag-over'));
+    draggedWorkKey = '';
+    if (!key || !targetStatus) return;
+    state.modal = { type: 'work-item', key, targetStatus };
+    render();
+  });
 
   document.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {

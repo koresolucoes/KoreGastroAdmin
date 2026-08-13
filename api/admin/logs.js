@@ -23,6 +23,9 @@ const ACTION_LABELS = {
   ADMIN_SUPPORT_REPLY_SENT: 'Resposta de suporte enviada',
   ADMIN_SUPPORT_TICKET_CREATED: 'Chamado criado',
   ADMIN_SUPPORT_TICKET_UPDATED: 'Chamado atualizado',
+  ADMIN_SUPPORT_WORK_ITEM_UPDATED: 'Card de suporte organizado',
+  ADMIN_BETA_APPLICATION_UPDATED: 'Candidatura do beta atualizada',
+  ADMIN_BETA_WORK_ITEM_UPDATED: 'Card do programa beta organizado',
   ADMIN_PLAN_CREATED: 'Plano criado',
   ADMIN_PLAN_UPDATED: 'Plano atualizado',
   ADMIN_PLAN_DELETED: 'Plano excluído',
@@ -36,6 +39,7 @@ const CATEGORY_LABELS = {
   access: 'Acessos e segurança',
   billing: 'Financeiro e assinaturas',
   support: 'Suporte',
+  beta: 'Programa beta',
   product: 'Produto e cardápio',
   customer: 'Clientes e onboarding',
   system: 'Sistema'
@@ -45,6 +49,7 @@ function categoryFromAction(action = '') {
   if (/ACCESS|ADMINISTRATOR|SESSION|MFA/.test(action)) return 'access';
   if (/SUBSCRIPTION|INVOICE|PAYMENT/.test(action)) return 'billing';
   if (/SUPPORT|TICKET|MESSAGE/.test(action)) return 'support';
+  if (/BETA/.test(action)) return 'beta';
   if (/PLAN|MENU|CATALOG/.test(action)) return 'product';
   if (/TENANT|CUSTOMER|PROVISION/.test(action)) return 'customer';
   return 'system';
