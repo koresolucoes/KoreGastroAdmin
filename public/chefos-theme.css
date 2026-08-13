@@ -1,0 +1,253 @@
+:root {
+  --bg: #090b0f;
+  --sidebar: #0d1117;
+  --surface: #11161d;
+  --surface-2: #171d26;
+  --surface-3: #202734;
+  --line: #27313d;
+  --line-soft: rgba(255, 255, 255, .06);
+  --text: #f7f4ee;
+  --muted: #a09485;
+  --muted-2: #74695d;
+  --accent: #dd671f;
+  --accent-light: #ffb887;
+  --accent-soft: rgba(221, 103, 31, .14);
+  --success: #31cf9e;
+  --warning: #f0b15b;
+  --danger: #ff6f7f;
+  --shadow: 0 24px 70px rgba(0, 0, 0, .32);
+}
+
+html {
+  background: radial-gradient(circle at top left, rgba(221, 103, 31, .11), transparent 28rem), var(--bg);
+}
+
+body {
+  position: relative;
+  isolation: isolate;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 14% 10%, rgba(221, 103, 31, .18), transparent 24rem),
+    radial-gradient(circle at 88% 2%, rgba(255, 184, 135, .09), transparent 18rem),
+    linear-gradient(180deg, #090b0f 0%, #0b0e13 100%);
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(18px);
+}
+
+body::before {
+  top: -10rem;
+  left: -12rem;
+  width: 30rem;
+  height: 30rem;
+  background: radial-gradient(circle, rgba(221, 103, 31, .18), transparent 70%);
+}
+
+body::after {
+  top: 4rem;
+  right: -10rem;
+  width: 24rem;
+  height: 24rem;
+  background: radial-gradient(circle, rgba(255, 184, 135, .08), transparent 68%);
+}
+
+.sidebar {
+  background: linear-gradient(180deg, rgba(13, 17, 23, .98), rgba(11, 14, 19, .98));
+  box-shadow: 20px 0 60px rgba(0, 0, 0, .14);
+}
+
+.brand {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .025), transparent);
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 184, 135, .18);
+  border-radius: 10px;
+  color: transparent;
+  font-size: 0;
+  background:
+    url('/favicon.svg') center / 67% no-repeat,
+    linear-gradient(150deg, #ff9a57 0%, #dd671f 100%);
+  box-shadow: 0 10px 28px rgba(221, 103, 31, .24);
+}
+
+.nav-item {
+  border-radius: 12px;
+  transition: color .16s ease, background .16s ease, transform .16s ease;
+}
+
+.nav-item:hover {
+  color: #eef1f4;
+  background: rgba(255, 255, 255, .05);
+  transform: translateX(1px);
+}
+
+.nav-item.active {
+  color: #fff;
+  background: linear-gradient(90deg, rgba(221, 103, 31, .18), rgba(255, 255, 255, .03));
+  box-shadow: inset 2px 0 0 var(--accent), 0 12px 28px rgba(0, 0, 0, .12);
+}
+
+.topbar {
+  background: linear-gradient(180deg, rgba(13, 16, 22, .92), rgba(12, 14, 19, .84));
+  backdrop-filter: blur(18px);
+}
+
+.global-search {
+  border-radius: 12px;
+  background: rgba(14, 19, 26, .94);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+}
+
+.top-action {
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(23, 29, 39, .96), rgba(17, 22, 31, .96));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .12);
+}
+
+.primary,
+.secondary {
+  border-radius: 12px;
+}
+
+.secondary {
+  background: rgba(23, 29, 39, .96);
+}
+
+.panel,
+.metric-card {
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(18, 22, 29, .98), rgba(14, 17, 23, .96));
+  box-shadow: 0 16px 48px rgba(0, 0, 0, .16);
+}
+
+.metric-card {
+  overflow: hidden;
+}
+
+.summary-strip {
+  border-radius: 18px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(18, 22, 29, .98), rgba(14, 17, 23, .96));
+  box-shadow: 0 12px 38px rgba(0, 0, 0, .12);
+}
+
+.data-toolbar {
+  border-radius: 18px 18px 0 0;
+  background: #10151d;
+}
+
+.table-wrap {
+  border-radius: 18px;
+}
+
+.login-shell {
+  background: radial-gradient(circle at 15% 10%, rgba(255, 122, 61, .13), transparent 27rem), #090c11;
+}
+
+.login-shell::before {
+  content: "OPERAÇÃO • RECEITA • SUPORTE • PRODUTO";
+  position: fixed;
+  right: -145px;
+  bottom: 120px;
+  color: rgba(255, 255, 255, .025);
+  font-size: 58px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  transform: rotate(-90deg);
+}
+
+.login-brand {
+  align-self: start;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 25px;
+  font-weight: 850;
+  letter-spacing: -.05em;
+}
+
+.login-brand .brand-mark {
+  width: 47px;
+  height: 47px;
+  border-radius: 13px;
+  font-size: 0;
+}
+
+.login-brand small {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.login-card {
+  justify-self: end;
+  width: min(100%, 440px);
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--line);
+  padding: 34px;
+  background: rgba(17, 22, 31, .92);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .42);
+}
+
+.login-card h1 {
+  margin-bottom: 0;
+  font-size: 34px;
+}
+
+.login-card .muted {
+  margin-bottom: 6px;
+}
+
+.login-card label,
+.modal-body > label {
+  color: #c8ced7;
+}
+
+.login-card input,
+.modal-card input,
+.modal-card select,
+.modal-card textarea {
+  border-color: #303948;
+  background: #0c1117;
+}
+
+.modal-card {
+  border-color: #303948;
+  background: #121821;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, .65);
+}
+
+.detail-drawer {
+  border-left-color: #303948;
+  background: #121821;
+  box-shadow: -25px 0 80px rgba(0, 0, 0, .45);
+}
+
+.notice {
+  box-shadow: var(--shadow);
+}
+
+@media (max-width: 1080px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    box-shadow: none;
+  }
+}
