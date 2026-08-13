@@ -35,6 +35,9 @@
     logs: null,
     betaApplications: null,
     betaSummary: null,
+    workCards: null,
+    workMeta: null,
+    workView: 'radar',
     notice: null,
     modal: null,
     sidebarOpen: false,
@@ -42,13 +45,15 @@
     filters: {
       customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active',
       catalog: '', catalogCategory: 'all', catalogStatus: 'all', auditQuery: '', auditCategory: 'all',
-      auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1
+      auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1,
+      betaQuery: '', betaStatus: 'all', betaAttention: 'all', workQuery: '', workOwner: 'all'
     }
   };
+  let draggedWorkKey = '';
 
   const navigation = [
     { label: 'OperaÃ§Ã£o', items: [
-      ['overview', 'VisÃ£o geral', 'âŒ‚'], ['subscriptions', 'Assinaturas', 'â—'],
+      ['overview', 'VisÃ£o geral', 'âŒ‚'], ['workboard', 'Kanban operacional', 'â–¦'], ['subscriptions', 'Assinaturas', 'â—'],
       ['tenants', 'Clientes', 'â—«'], ['beta', 'Programa beta', 'â˜…'], ['support', 'Suporte', 'âœ¦']
     ] },
     { label: 'Produto', items: [
@@ -77,7 +82,18 @@
   const initials = (value = '') => value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'C';
   const normalize = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const includes = (haystack, needle) => normalize(haystack).includes(normalize(needle));
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const BETA_STAGE_LABELS = { new: 'Nova', review: 'Em anÃ¡lise', contact: 'Contato', interview: 'Entrevista', approved: 'Aprovada', onboarding: 'Onboarding', active: 'Beta ativo', completed: 'ConcluÃ­da', converted: 'Convertida', closed: 'Encerrada' };
+  const BETA_STAGES = Object.keys(BETA_STAGE_LABELS);
+  const WORK_SOURCE_LABELS = { support: 'Suporte', beta: 'Programa beta' };
+  const SUPPORT_STATUS_LABELS = { open: 'Aberto', in_progress: 'Em atendimento', resolved: 'Resolvido', closed: 'Fechado' };
+  const workStatusLabel = (source, value) => (source === 'support' ? SUPPORT_STATUS_LABELS : BETA_STAGE_LABELS)[value] || value;
   const toInputDate = (value) => value && !Number.isNaN(new Date(value).getTime()) ? new Date(value).toISOString().slice(0, 10) : '';
+  const toInputDateTime = (value) => {
+    if (!value || Number.isNaN(new Date(value).getTime())) return '';
+    const date = new Date(value);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
   const can = (capability) => Boolean(state.user?.capabilities?.includes('*') || state.user?.capabilities?.includes(capability));
   const roleLabel = (role) => ({ owner: 'ProprietÃ¡rio', platform_admin: 'Administrador', finance: 'Financeiro', support: 'Suporte', auditor: 'Auditor' }[role] || role || 'Administrador');
   const accessStatusLabel = (value) => ({ invited: 'Convite pendente', active: 'Ativo', suspended: 'Suspenso', revoked: 'Revogado' }[value] || value || 'Desconhecido');
@@ -176,6 +192,48 @@
     return `<span class="priority priority-${type}">${escape(label)}</span>`;
   }
 
+  function betaRemainingDays(participant) {
+    if (!participant?.beta_ends_at) return null;
+    return Math.ceil((new Date(participant.beta_ends_at).getTime() - Date.now()) / DAY_MS);
+  }
+
+  function betaParticipantStatusSignal(status) {
+    const labels = { onboarding: 'Onboarding', active: 'Beta ativo', completed: 'ConcluÃ­do', converted: 'Convertido', closed: 'Encerrado' };
+    const tone = status === 'onboarding' ? 'warning' : status === 'closed' ? 'neutral' : 'success';
+    return `<span class="health-signal ${tone}"><i></i>${escape(labels[status] || 'Onboarding')}</span>`;
+  }
+
+  function betaStageSignal(stage) {
+    const tone = ['approved', 'active', 'completed', 'converted'].includes(stage) ? 'success' : ['closed'].includes(stage) ? 'neutral' : ['contact', 'interview', 'onboarding'].includes(stage) ? 'warning' : '';
+    return `<span class="health-signal ${tone}"><i></i>${escape(BETA_STAGE_LABELS[stage] || stage || 'Nova')}</span>`;
+  }
+
+  function betaLatestEvent(application) {
+    return [...(application?.events || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+  }
+
+  function betaNeedsAttention(application) {
+    if (['converted', 'closed'].includes(application?.status)) return false;
+    const reference = betaLatestEvent(application)?.created_at || application?.updated_at || application?.submitted_at;
+    return reference && Date.now() - new Date(reference).getTime() >= 3 * DAY_MS;
+  }
+
+  function whatsappUrl(phone) {
+    let digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+    return digits ? `https://wa.me/${digits}` : '';
+  }
+
+  function betaParticipantHealthSignal(participant) {
+    if (!participant?.activated_at) return '<span class="health-signal warning"><i></i>Aguardando ativaÃ§Ã£o</span>';
+    const remaining = betaRemainingDays(participant);
+    if (remaining === null) return '<span class="health-signal warning"><i></i>Sem data de encerramento</span>';
+    if (remaining < 0) return `<span class="health-signal danger"><i></i>Beta encerrado hÃ¡ ${Math.abs(remaining)} dia(s)</span>`;
+    if (remaining <= 7) return `<span class="health-signal danger"><i></i>${remaining} dia(s) restantes</span>`;
+    if (remaining <= 21) return `<span class="health-signal warning"><i></i>${remaining} dia(s) restantes</span>`;
+    return `<span class="health-signal success"><i></i>${remaining} dia(s) restantes</span>`;
+  }
+
   function showNotice(text, type = 'success') {
     state.notice = { text, type };
     render();
@@ -206,949 +264,4 @@
       body: options.body ? JSON.stringify(options.body) : undefined
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.msg || body.message || body.error_description || 'NÃ£o foi possÃ­vel validar o segundo fator.');
-    return body;
-  }
-
-  async function startMfaEnrollment() {
-    const enrolled = await authRequest('/factors', {
-      method: 'POST',
-      body: { factor_type: 'totp', friendly_name: 'ChefOS Control Center', issuer: 'ChefOS' }
-    });
-    const qrCode = enrolled.totp?.qr_code || '';
-    state.mfaMode = {
-      type: 'enroll',
-      factorId: enrolled.id,
-      qrCode: qrCode.startsWith('data:') ? qrCode : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrCode)}`,
-      secret: enrolled.totp?.secret || '',
-      uri: enrolled.totp?.uri || ''
-    };
-  }
-
-  async function prepareMfa(authUser = null) {
-    const privileged = Boolean(state.user?.mfaRequired || ['owner', 'platform_admin'].includes(state.user?.role));
-    if (!privileged || state.user?.mfaVerified) return false;
-    const user = authUser?.factors ? authUser : await authRequest('/user');
-    const factor = user?.factors?.find((item) => item.factor_type === 'totp' && item.status === 'verified');
-    if (factor) state.mfaMode = { type: 'challenge', factorId: factor.id };
-    else {
-      const pending = user?.factors?.find((item) => item.factor_type === 'totp' && item.status === 'unverified');
-      if (pending) await authRequest(`/factors/${encodeURIComponent(pending.id)}`, { method: 'DELETE' });
-      await startMfaEnrollment();
-    }
-    state.loading = false;
-    render();
-    return true;
-  }
-
-  async function verifyMfa(code) {
-    const challenge = await authRequest(`/factors/${encodeURIComponent(state.mfaMode.factorId)}/challenge`, {
-      method: 'POST', body: { factorId: state.mfaMode.factorId }
-    });
-    const verified = await authRequest(`/factors/${encodeURIComponent(state.mfaMode.factorId)}/verify`, {
-      method: 'POST', body: { challenge_id: challenge.id, code: String(code || '').replace(/\s/g, '') }
-    });
-    if (!verified.access_token) throw new Error('O Supabase nÃ£o retornou a sessÃ£o AAL2 esperada.');
-    state.token = verified.access_token;
-    sessionStorage.setItem('koregastro_admin_token', state.token);
-    state.mfaMode = null;
-    state.user = (await api('/api/admin/session')).data;
-    await loadCore();
-    showNotice('Segundo fator confirmado. SessÃ£o administrativa protegida.');
-  }
-
-  async function signIn(email, password) {
-    const response = await fetch(`${String(config.supabaseUrl).replace(/\/$/, '')}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: { apikey: config.supabaseAnonKey, Authorization: `Bearer ${config.supabaseAnonKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || !body.access_token) throw new Error(body.error_description || 'Credenciais invÃ¡lidas.');
-    state.token = body.access_token;
-    sessionStorage.setItem('koregastro_admin_token', state.token);
-    state.user = (await api('/api/admin/session')).data;
-    return !(await prepareMfa(body.user));
-  }
-
-  async function finishInvitation(password, confirmation) {
-    if (password !== confirmation) throw new Error('As senhas informadas nÃ£o coincidem.');
-    if (password.length < 10) throw new Error('Use uma senha com pelo menos 10 caracteres.');
-    const response = await fetch(`${String(config.supabaseUrl).replace(/\/$/, '')}/auth/v1/user`, {
-      method: 'PUT',
-      headers: { apikey: config.supabaseAnonKey, Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.msg || body.message || body.error_description || 'NÃ£o foi possÃ­vel concluir o convite.');
-    sessionStorage.setItem('koregastro_admin_token', state.token);
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
-    state.inviteMode = false;
-    state.user = (await api('/api/admin/session')).data;
-    if (await prepareMfa()) return;
-    await loadCore();
-    showNotice('Convite aceito. Seu acesso administrativo estÃ¡ ativo.');
-  }
-
-  async function signOut() {
-    try {
-      await fetch(`${String(config.supabaseUrl).replace(/\/$/, '')}/auth/v1/logout`, {
-        method: 'POST', headers: { apikey: config.supabaseAnonKey, Authorization: `Bearer ${state.token}` }
-      });
-    } finally {
-      sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null });
-      render();
-    }
-  }
-
-  async function loadCore() {
-    state.loading = true;
-    render();
-    try {
-      const [dashboard, customers, plans, tickets] = await Promise.all([
-        api('/api/admin/dashboard'), api('/api/admin/customers?pageSize=500'), api('/api/admin/plans'), api('/api/admin/tickets')
-      ]);
-      state.dashboard = dashboard.data;
-      state.tenants = customers.data || [];
-      state.customerSummary = customers.summary || null;
-      state.customerMeta = customers.meta || null;
-      state.plans = plans.data || [];
-      state.permissionCatalog = plans.permissionCatalog || [];
-      state.tickets = tickets.data || [];
-      state.ticketSummary = tickets.summary || null;
-      state.ticketMeta = tickets.meta || null;
-      if (!state.selectedTenant && state.tenants[0]) state.selectedTenant = state.tenants[0].accountId || state.tenants[0].id;
-      const selectedCustomer = state.tenants.find((tenant) => String(tenant.accountId || tenant.id) === String(state.selectedTenant));
-      if (!selectedCustomer?.stores?.some((store) => String(store.storeId || store.id) === String(state.selectedStore))) {
-        state.selectedStore = selectedCustomer?.stores?.[0]?.storeId || selectedCustomer?.stores?.[0]?.id || '';
-      }
-      if (!state.selectedTicketId && state.tickets[0]) state.selectedTicketId = state.tickets[0].id;
-    } finally {
-      state.loading = false;
-      render();
-    }
-  }
-
-  async function loadSection(section = state.section, force = false) {
-    if (section === 'support' && (force || !state.tickets)) {
-      const tickets = await api('/api/admin/tickets');
-      state.tickets = tickets.data || [];
-      state.ticketSummary = tickets.summary || null;
-      state.ticketMeta = tickets.meta || null;
-    }
-    if (section === 'catalog') {
-      if (!state.selectedStore) {
-        state.menu = [];
-        state.menuCategories = [];
-        state.menuMeta = null;
-      } else {
-        const menu = await api(`/api/admin/tenant-menu?storeId=${encodeURIComponent(state.selectedStore)}`);
-        state.menu = menu.data || [];
-        state.menuCategories = menu.categories || [];
-        state.menuMeta = menu.meta || null;
-      }
-    }
-    if (section === 'administrators' && (force || !state.admins)) {
-      const access = await api('/api/admin/administrators');
-      state.admins = access.data || [];
-      state.adminSummary = access.summary || null;
-      state.adminRoles = access.roles || [];
-      state.adminMeta = access.meta || null;
-    }
-    if (section === 'health' && (force || !state.health)) state.health = await api('/api/admin/health');
-    if (section === 'beta' && (force || !state.betaApplications)) {
-      const betaPayload = await api('/api/admin/beta-applications');
-      state.betaApplications = betaPayload.data || [];
-      state.betaSummary = betaPayload.summary || {};
-    }
-    if (section === 'logs' && (force || !state.logs)) {
-      const filters = state.filters;
-      const query = new URLSearchParams({
-        page: String(filters.auditPage || 1), pageSize: '40', q: filters.auditQuery || '',
-        category: filters.auditCategory || 'all', outcome: filters.auditOutcome || 'all',
-        actor: filters.auditActor || '', from: filters.auditFrom || '', to: filters.auditTo || ''
-      });
-      state.logs = await api(`/api/admin/logs?${query}`);
-    }
-  }
-
-  function authNotice() {
-    if (!state.notice) return '';
-    return `<div class='notice auth-notice ${escape(state.notice.type)}' role='status'><span>${state.notice.type === 'error' ? '!' : 'âœ“'}</span>${escape(state.notice.text)}<button type='button' data-action='dismiss-notice' aria-label='Fechar'>Ã—</button></div>`;
-  }
-
-  function loginView() {
-    return `<section class="login-shell">
-      <div class="login-brand"><span class="brand-mark">C</span><strong>ChefOS</strong><small>Control Center</small></div>
-      <form class="login-card" data-form="login">${authNotice()}
-        <p class="eyebrow">ACESSO ADMINISTRATIVO</p>
-        <h1>Bem-vindo ao centro de comando.</h1>
-        <p class="muted">Gerencie toda a operaÃ§Ã£o ChefOS com uma conta autorizada.</p>
-        <label>E-mail<input type="email" name="email" autocomplete="email" placeholder="admin@chefos.online" required /></label>
-        <label>Senha<input type="password" name="password" autocomplete="current-password" placeholder="Sua senha" required /></label>
-        <button class="primary wide-button" type="submit">Entrar no Control Center</button>
-        <small class="secure-note"><i></i>SessÃ£o protegida pelo Supabase</small>
-      </form>
-    </section>`;
-  }
-
-  function inviteView() {
-    return `<section class='login-shell invite-acceptance'><div class='login-brand'><span class='brand-mark'>C</span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card' data-form='invite-password'>${authNotice()}<p class='eyebrow'>CONVITE ADMINISTRATIVO</p><h1>Proteja seu novo acesso.</h1><p class='muted'>Defina uma senha forte para concluir o convite e entrar no centro de controle.</p><label>Nova senha<input name='password' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='MÃ­nimo de 10 caracteres' /></label><label>Confirmar senha<input name='confirmation' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Repita a senha' /></label><div class='login-security'><span>âœ“</span><p><strong>AtivaÃ§Ã£o auditada</strong><small>A conta sÃ³ serÃ¡ ativada apÃ³s a confirmaÃ§Ã£o do e-mail.</small></p></div><button class='primary wide-button' type='submit'>Aceitar convite e entrar â†’</button></form></section>`;
-  }
-
-  function mfaView() {
-    const enrollment = state.mfaMode?.type === 'enroll';
-    return `<section class='login-shell mfa-shell'><div class='login-brand'><span class='brand-mark'>C</span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card mfa-card' data-form='mfa'>${authNotice()}<p class='eyebrow'>SEGUNDO FATOR</p><h1>${enrollment ? 'Proteja sua conta administrativa.' : 'Confirme que Ã© vocÃª.'}</h1><p class='muted'>${enrollment ? 'Escaneie o QR Code no Google Authenticator, Microsoft Authenticator, 1Password ou aplicativo compatÃ­vel.' : 'Abra seu aplicativo autenticador e informe o cÃ³digo atual.'}</p>${enrollment ? `<div class='mfa-setup'><img src='${escape(state.mfaMode.qrCode)}' alt='QR Code para cadastrar o segundo fator' /><div><small>CHAVE MANUAL</small><code>${escape(state.mfaMode.secret)}</code><button type='button' class='text-button' data-action='copy-mfa-secret'>Copiar chave</button></div></div>` : `<div class='mfa-prompt'><span>âŒ</span><div><strong>Autenticador cadastrado</strong><small>O cÃ³digo muda a cada 30 segundos.</small></div></div>`}<label>CÃ³digo de 6 dÃ­gitos<input name='code' type='text' inputmode='numeric' autocomplete='one-time-code' required minlength='6' maxlength='6' pattern='[0-9]{6}' placeholder='000000' /></label><button class='primary wide-button' type='submit'>${enrollment ? 'Ativar MFA e entrar â†’' : 'Verificar e entrar â†’'}</button><button class='quiet mfa-logout' type='button' data-action='logout'>Sair e usar outra conta</button></form></section>`;
-  }
-
-  function missingConfigView() {
-    return `<section class="login-shell"><div class="login-card"><p class="eyebrow">CONFIGURAÃ‡ÃƒO PENDENTE</p><h1>Painel pronto para conectar</h1><p class="muted">Configure <code>VITE_SUPABASE_URL</code> e <code>VITE_SUPABASE_ANON_KEY</code> antes do deploy.</p></div></section>`;
-  }
-
-  function sidebar() {
-    const groups = navigation.map((group) => `<div class="nav-group"><span class="nav-label">${group.label}</span>${group.items.map(([key, label, glyph]) => {
-      const badge = key === 'support' && (state.dashboard?.openTickets || 0) ? `<b>${state.dashboard.openTickets}</b>` : '';
-      return `<button class="nav-item ${state.section === key ? 'active' : ''}" data-action="section" data-section="${key}"><span class="nav-glyph" aria-hidden="true">${glyph}</span><span>${label}</span>${badge}</button>`;
-    }).join('')}</div>`).join('');
-    return `<aside class="sidebar ${state.sidebarOpen ? 'open' : ''}" aria-label="NavegaÃ§Ã£o principal">
-      <div class="brand"><span class="brand-mark">C</span><span>ChefOS<small>Control Center</small></span><button class="icon-button sidebar-close" data-action="toggle-sidebar" aria-label="Fechar menu">Ã—</button></div>
-      <nav>${groups}</nav>
-      <div class="sidebar-footer">
-        <div class="system-pill"><i></i><span><strong>Sistema operacional</strong><small>Todos os serviÃ§os ativos</small></span></div>
-        <div class="user-card"><span class="avatar">${initials(state.user?.email)}</span><span><strong>${escape(state.user?.email?.split('@')[0])}</strong><small>${escape(state.user?.email)}</small></span><button class="quiet" data-action="logout">Sair</button></div>
-      </div>
-    </aside>`;
-  }
-
-  function commandResults() {
-    if (state.globalQuery.trim().length < 2) return '';
-    const query = state.globalQuery.trim();
-    const sectionResults = Object.entries(sectionLabels).filter(([, label]) => includes(label, query)).slice(0, 4);
-    const tenantResults = state.tenants.filter((tenant) => includes(`${tenant.full_name} ${tenant.email} ${(tenant.stores || []).map((store) => store.name).join(' ')}`, query)).slice(0, 5);
-    if (!sectionResults.length && !tenantResults.length) return `<div class="command-results"><p>Nenhum resultado para â€œ${escape(query)}â€.</p></div>`;
-    return `<div class="command-results">
-      ${sectionResults.length ? `<small>NAVEGAÃ‡ÃƒO</small>${sectionResults.map(([key, label]) => `<button data-action="command-section" data-section="${key}"><span class="command-icon">â†—</span><span><strong>${label}</strong><em>Abrir seÃ§Ã£o</em></span></button>`).join('')}` : ''}
-      ${tenantResults.length ? `<small>CLIENTES</small>${tenantResults.map((tenant) => `<button data-action="open-tenant" data-id="${tenant.id}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><em>${escape(tenant.email)}</em></span></button>`).join('')}` : ''}
-    </div>`;
-  }
-
-  function topbar() {
-    return `<header class="topbar">
-      <button class="icon-button menu-button" data-action="toggle-sidebar" aria-label="Abrir menu">â˜°</button>
-      <div class="breadcrumbs"><span>ChefOS</span><b>/</b><strong>${sectionLabels[state.section]}</strong></div>
-      <div class="global-search"><span>âŒ•</span><input data-search="global" value="${escape(state.globalQuery)}" placeholder="Buscar cliente, loja ou seÃ§Ã£o..." aria-label="Busca global" /><kbd>Ctrl K</kbd>${commandResults()}</div>
-      <button class="top-action" data-action="open-provision"><span>ï¼‹</span>Novo cliente</button>
-    </header>`;
-  }
-
-  function pageHeader(eyebrow, title, description, actions = '') {
-    return `<header class="page-header"><div><p class="eyebrow">${eyebrow}</p><h1>${title}</h1><p class="muted">${description}</p></div>${actions ? `<div class="header-actions">${actions}</div>` : ''}</header>`;
-  }
-
-  function metric(label, value, detail, tone = '', glyph = 'â†—') {
-    return `<article class="metric-card ${tone}"><div><span>${label}</span><i aria-hidden="true">${glyph}</i></div><strong>${value}</strong><small>${detail}</small></article>`;
-  }
-
-  function overview() {
-    const data = state.dashboard || {};
-    const subscriptions = data.subscriptions || {};
-    const totalSubscriptions = Object.values(subscriptions).reduce((sum, value) => sum + Number(value || 0), 0);
-    const healthySubscriptions = Number(data.activeSubscriptions || 0) + Number(data.activeTrials || 0);
-    const activeRate = totalSubscriptions ? Math.round((healthySubscriptions / totalSubscriptions) * 100) : 0;
-    const recent = [...state.tenants].sort((a, b) => new Date(b.created_at || b.updated_at) - new Date(a.created_at || a.updated_at)).slice(0, 5);
-    const attentionTickets = (state.tickets || []).filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).sort((a, b) => Number(b.waitingHours || 0) - Number(a.waitingHours || 0)).slice(0, 4);
-    const hour = new Date().getHours();
-    const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
-    const alerts = [];
-    if (data.atRiskSubscriptions) alerts.push(`<button data-action="filtered-section" data-section="subscriptions" data-filter="past_due"><i class="alert-dot danger"></i><span><strong>${data.atRiskSubscriptions} assinatura(s) inadimplente(s)</strong><small>Precisam de acompanhamento financeiro</small></span><b>Ver agora â†’</b></button>`);
-    if (data.expiredButEnabled) alerts.push(`<button data-action="section" data-section="subscriptions"><i class="alert-dot danger"></i><span><strong>${data.expiredButEnabled} acesso(s) marcado(s) ativo(s), mas vencido(s)</strong><small>Corrija o perÃ­odo para evitar divergÃªncia de acesso</small></span><b>Revisar â†’</b></button>`);
-    if (data.waitingOver24Hours) alerts.push(`<button data-action="section" data-section="support"><i class="alert-dot warning"></i><span><strong>${data.waitingOver24Hours} chamado(s) aguardando hÃ¡ mais de 24h</strong><small>Fila fora do objetivo de resposta</small></span><b>Atender â†’</b></button>`);
-    if (data.urgentTickets) alerts.push(`<button data-action="section" data-section="support"><i class="alert-dot warning"></i><span><strong>${data.urgentTickets} chamado(s) prioritÃ¡rio(s)</strong><small>Fila de atendimento requer atenÃ§Ã£o</small></span><b>Abrir fila â†’</b></button>`);
-    if (data.incompleteOnboarding) alerts.push(`<button data-action="section" data-section="tenants"><i class="alert-dot info"></i><span><strong>${data.incompleteOnboarding} cliente(s) com onboarding incompleto</strong><small>Faltam estrutura empresarial, dados fiscais ou assinatura</small></span><b>Ver clientes â†’</b></button>`);
-    if (!alerts.length) alerts.push(`<div class="all-clear"><i>âœ“</i><span><strong>OperaÃ§Ã£o sob controle</strong><small>Nenhuma pendÃªncia crÃ­tica identificada agora.</small></span></div>`);
-
-    return `<section class="page overview-page">
-      ${pageHeader('PAINEL EXECUTIVO', `${greeting}, equipe ChefOS.`, `Pulso operacional atualizado ${relative(data.generatedAt)}.`, `<button class="secondary" data-action="refresh">â†» Atualizar dados</button><button class="primary" data-action="open-provision">ï¼‹ Novo cliente</button>`)}
-      ${(data.dataQuality?.warnings || []).length ? `<div class="data-quality-banner"><span>i</span><div><strong>Receita contratada, ainda sem conciliaÃ§Ã£o automÃ¡tica</strong><p>${escape(data.dataQuality.warnings[0])}</p></div><button data-action="section" data-section="subscriptions">Entender na base â†’</button></div>` : ''}
-      <div class="metrics executive-metrics">
-        ${metric('Receita mensal contratada', money(data.contractedMonthly), `${money((data.contractedMonthly || 0) * 12)} anualizado`, 'accent', 'R$')}
-        ${metric('Acessos vigentes', shortNumber(healthySubscriptions), `${activeRate}% das assinaturas cadastradas`, 'success', 'â†—')}
-        ${metric('Clientes ChefOS', shortNumber(data.tenants), `${data.stores || 0} operaÃ§Ãµes Â· ${data.incompleteOnboarding || 0} incompletas`, data.incompleteOnboarding ? 'warning' : '', 'â—«')}
-        ${metric('Fila de suporte', shortNumber((data.openTickets || 0) + (data.inProgressTickets || 0)), `${data.waitingOver24Hours || 0} aguardando hÃ¡ mais de 24h`, data.waitingOver24Hours ? 'warning' : '', 'âœ¦')}
-      </div>
-      <div class="operations-radar">
-        <button data-action="filtered-section" data-section="subscriptions" data-filter="trialing"><span>TESTES ENCERRANDO</span><strong>${data.trialsEnding7Days || 0}</strong><small>nos prÃ³ximos 7 dias</small></button>
-        <button data-action="section" data-section="subscriptions"><span>ACESSOS VENCIDOS</span><strong>${data.expiredButEnabled || 0}</strong><small>com status ainda ativo</small></button>
-        <button data-action="section" data-section="support"><span>SLA &gt; 24 HORAS</span><strong>${data.waitingOver24Hours || 0}</strong><small>chamados pendentes</small></button>
-        <button data-action="section" data-section="tenants"><span>ONBOARDING INCOMPLETO</span><strong>${data.incompleteOnboarding || 0}</strong><small>clientes para revisar</small></button>
-      </div>
-      <div class="overview-grid">
-        <section class="panel revenue-panel">
-          <div class="panel-heading"><div><p class="eyebrow">ASSINATURAS</p><h2>SaÃºde da receita</h2></div><button class="text-button" data-action="section" data-section="subscriptions">Ver assinaturas â†’</button></div>
-          <div class="revenue-hero"><span><small>CONTRATADO / MÃŠS</small><strong>${money(data.contractedMonthly)}</strong></span><span><small>RENOVAÃ‡Ã•ES EM 7 DIAS</small><strong>${data.renewalsNext7Days || 0}</strong></span></div>
-          <div class="distribution-bar" aria-label="DistribuiÃ§Ã£o das assinaturas">
-            ${Object.entries(subscriptions).map(([key, value]) => `<i class="segment segment-${key}" style="width:${totalSubscriptions ? (value / totalSubscriptions) * 100 : 0}%" title="${key}: ${value}"></i>`).join('')}
-          </div>
-          <div class="distribution-legend">${Object.entries(subscriptions).map(([key, value]) => `<span>${status(key)}<strong>${value}</strong></span>`).join('') || '<p class="empty-inline">Ainda nÃ£o hÃ¡ assinaturas.</p>'}</div>
-        </section>
-        <section class="panel attention-panel"><div class="panel-heading"><div><p class="eyebrow">AGORA</p><h2>Pontos de atenÃ§Ã£o</h2></div></div><div class="attention-list">${alerts.join('')}</div></section>
-      </div>
-      <div class="overview-grid lower">
-        <section class="panel compact-table"><div class="panel-heading"><div><p class="eyebrow">CLIENTES</p><h2>Entradas recentes</h2></div><button class="text-button" data-action="section" data-section="tenants">Ver todos â†’</button></div>
-          <div class="recent-list">${recent.map((tenant) => { const subscription = subscriptionOf(tenant); return `<button data-action="open-tenant" data-id="${tenant.accountId || tenant.id}"><span class="avatar">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span>${subscription ? status(subscription.status) : status('unknown')}<time>${relative(tenant.created_at || tenant.updated_at)}</time></button>`; }).join('') || '<p class="empty">Nenhum cliente cadastrado.</p>'}</div>
-        </section>
-        <section class="panel support-snapshot"><div class="panel-heading"><div><p class="eyebrow">SUPORTE</p><h2>Fila prioritÃ¡ria</h2></div><button class="text-button" data-action="section" data-section="support">Central de suporte â†’</button></div>
-          <div class="snapshot-list">${attentionTickets.map((ticket) => `<button data-action="open-ticket" data-id="${ticket.id}"><span>${priority(ticket.priority)}<strong>${escape(ticket.subject || 'Sem assunto')}</strong><small>${escape(ticket.client_name)} Â· ${relative(ticket.updated_at || ticket.created_at)}</small></span><span class="snapshot-status">${sla(ticket)}${status(ticket.status)}</span></button>`).join('') || '<div class="all-clear compact"><i>âœ“</i><span><strong>Caixa de entrada vazia</strong><small>Nenhum chamado pendente.</small></span></div>'}</div>
-        </section>
-      </div>
-    </section>`;
-  }
-
-  function subscriptions() {
-    const query = state.filters.subscription;
-    const filter = state.filters.subscriptionStatus;
-    const rows = state.tenants.map((tenant) => ({ tenant, subscription: subscriptionOf(tenant) || {} }))
-      .filter(({ tenant, subscription }) => (!query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query)) && (filter === 'all' || subscription.status === filter));
-    const contractedMonthly = rows.filter(({ subscription }) => subscription.status === 'active' && subscription.entitlementActive).reduce((sum, { subscription }) => sum + Number(planById(subscription.plan_id)?.price || 0), 0);
-    const dueSoon = rows.filter(({ subscription }) => { const diff = new Date(subscription.current_period_end).getTime() - Date.now(); return subscription.entitlementActive && diff >= 0 && diff <= 7 * 86400000; }).length;
-    const expired = rows.filter(({ subscription }) => subscription.periodExpired && ['active', 'trialing'].includes(subscription.status)).length;
-    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">â†“ Exportar CSV</button><button class="primary" data-action="open-provision">ï¼‹ Provisionar cliente</button>`;
-    return `<section class="page">
-      ${pageHeader('RECEITA E ACESSO', 'Assinaturas', 'Controle planos, vencimentos e o acesso de cada operaÃ§Ã£o ChefOS.', actions)}
-      <div class="integration-warning"><span>!</span><div><strong>AlteraÃ§Ãµes de acesso sÃ£o internas</strong><p>O conector de recorrÃªncia do Mercado Pago ainda nÃ£o estÃ¡ habilitado; mudanÃ§as aqui nÃ£o cancelam nem alteram cobranÃ§as no provedor.</p></div></div>
-      <div class="summary-strip"><div><span>Receita contratada nesta visÃ£o</span><strong>${money(contractedMonthly)}</strong></div><div><span>Assinaturas exibidas</span><strong>${rows.length}</strong></div><div><span>Vencem em 7 dias</span><strong>${dueSoon}</strong></div><div class="danger-text"><span>Ativas com perÃ­odo vencido</span><strong>${expired}</strong></div></div>
-      <div class="data-toolbar"><div class="search-field"><span>âŒ•</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="unpaid" ${filter === 'unpaid' ? 'selected' : ''}>NÃ£o pagas</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
-      <div class="panel table-wrap"><table><thead><tr><th>Cliente / operaÃ§Ã£o</th><th>Plano</th><th>Status</th><th>SaÃºde do acesso</th><th>Valor mensal</th><th>PerÃ­odo atual</th><th></th></tr></thead><tbody>
-        ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td>${entitlement(subscription)}</td><td><strong>${money(plan?.price)}</strong><small>valor do plano</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td><button class="row-action" data-action="edit-subscription" data-id="${accountId}">Gerenciar</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
-      </tbody></table></div>
-    </section>`;
-  }
-
-  function tenants() {
-    const query = state.filters.customer;
-    const rows = state.tenants.filter((tenant) => !query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query));
-    const summary = state.customerSummary || {};
-    const actions = `<button class="secondary" data-action="export" data-kind="customers">â†“ Exportar CSV</button><button class="primary" data-action="open-provision">ï¼‹ Novo cliente</button>`;
-    return `<section class="page">
-      ${pageHeader('BASE DE CLIENTES', 'Clientes e operaÃ§Ãµes', 'VisÃ£o 360Âº de identidade, onboarding, lojas, assinatura e suporte.', actions)}
-      <div class="summary-strip customer-summary"><div><span>Clientes</span><strong>${summary.total ?? state.tenants.length}</strong></div><div><span>OperaÃ§Ãµes</span><strong>${summary.stores || 0}</strong></div><div class="warning-text"><span>Onboarding incompleto</span><strong>${summary.incompleteOnboarding || 0}</strong></div><div class="danger-text"><span>Sem assinatura</span><strong>${summary.withoutSubscription || 0}</strong></div><div><span>Chamados abertos</span><strong>${summary.openTickets || 0}</strong></div></div>
-      <div class="data-toolbar"><div class="search-field"><span>âŒ•</span><input data-search="customer" value="${escape(query)}" placeholder="Buscar por nome, e-mail ou loja" /></div><span class="result-count">${rows.length} cliente(s)</span></div>
-      <div class="panel table-wrap"><table><thead><tr><th>Cliente</th><th>OperaÃ§Ãµes</th><th>Onboarding</th><th>Assinatura</th><th>Suporte</th><th>Ãšltima atividade</th><th></th></tr></thead><tbody>
-        ${rows.map((tenant) => { const subscription = subscriptionOf(tenant); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.email)}</small></span></button></td><td><strong>${tenant.stores?.length || 0} operaÃ§Ã£o(Ãµes)</strong><small>${escape(tenant.stores?.map((store) => store.name).join(', ') || 'Nenhuma loja')}</small></td><td>${onboarding(tenant)}</td><td>${subscription ? status(subscription.status) : status('unknown')}<small>${subscription ? escape(planById(subscription.plan_id)?.name || 'Plano nÃ£o identificado') : 'Requer configuraÃ§Ã£o'}</small></td><td><strong>${tenant.support?.openTickets || 0} aberto(s)</strong><small>${tenant.support?.urgentTickets || 0} prioritÃ¡rio(s)</small></td><td><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong><small>${date(tenant.last_sign_in_at || tenant.updated_at)}</small></td><td><button class="row-action" data-action="open-tenant" data-id="${accountId}">VisÃ£o 360Âº</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhum cliente encontrado.</td></tr>'}
-      </tbody></table></div>
-      ${state.customerMeta ? `<p class="dataset-meta">Exibindo ${state.customerMeta.returned || rows.length} de ${state.customerMeta.total || rows.length} contas retornadas pela API administrativa.</p>` : ''}
-    </section>`;
-  }
-
-  function filteredTickets() {
-    const query = state.filters.ticket;
-    const filter = state.filters.ticketStatus;
-    return (state.tickets || []).filter((ticket) => {
-      const matchesQuery = !query || includes(`${ticket.subject} ${ticket.client_name} ${ticket.store_name}`, query);
-      const matchesStatus = filter === 'all'
-        || (filter === 'active' ? !['resolved', 'closed'].includes(ticket.status) : false)
-        || (filter === 'completed' ? ['resolved', 'closed'].includes(ticket.status) : ticket.status === filter);
-      return matchesQuery && matchesStatus;
-    });
-  }
-
-  function support() {
-    const tickets = filteredTickets();
-    if (tickets.length && !tickets.some((ticket) => String(ticket.id) === String(state.selectedTicketId))) state.selectedTicketId = tickets[0].id;
-    const selected = (state.tickets || []).find((ticket) => String(ticket.id) === String(state.selectedTicketId));
-    const messages = selected?.messages || [];
-    const summary = state.ticketSummary || {};
-    return `<section class="page support-page">
-      ${pageHeader('ATENDIMENTO AO CLIENTE', 'Central de suporte', 'Priorize, responda e acompanhe cada conversa atÃ© a resoluÃ§Ã£o.', `<button class="secondary" data-action="reload-tickets">â†» Atualizar fila</button>`)}
-      <div class="support-kpis"><div><span>FILA ATIVA</span><strong>${summary.active || 0}</strong><small>chamados para atender</small></div><div><span>PRIORIDADE ALTA</span><strong>${summary.priority || 0}</strong><small>altos e urgentes</small></div><div class="${summary.waitingOver24Hours ? 'danger-text' : ''}"><span>SLA &gt; 24H</span><strong>${summary.waitingOver24Hours || 0}</strong><small>sem atualizaÃ§Ã£o</small></div><div><span>TOTAL NA BASE</span><strong>${summary.total || 0}</strong><small>atÃ© ${state.ticketMeta?.limit || 250} mais recentes</small></div></div>
-      <div class="support-workspace panel">
-        <aside class="ticket-queue">
-          <div class="queue-head"><div><h2>Caixa de entrada</h2><span>${tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).length} pendente(s)</span></div><div class="search-field compact"><span>âŒ•</span><input data-search="ticket" value="${escape(state.filters.ticket)}" placeholder="Buscar chamado" /></div><div class="filter-tabs"><button class="${state.filters.ticketStatus === 'active' ? 'active' : ''}" data-action="ticket-filter" data-value="active">Ativos</button><button class="${state.filters.ticketStatus === 'open' ? 'active' : ''}" data-action="ticket-filter" data-value="open">Novos</button><button class="${state.filters.ticketStatus === 'completed' ? 'active' : ''}" data-action="ticket-filter" data-value="completed">Finalizados</button><button class="${state.filters.ticketStatus === 'all' ? 'active' : ''}" data-action="ticket-filter" data-value="all">Todos</button></div></div>
-          <div class="queue-list">${tickets.map((ticket) => `<button class="queue-item ${String(ticket.id) === String(state.selectedTicketId) ? 'active' : ''}" data-action="select-ticket" data-id="${ticket.id}"><div><span class="avatar small">${initials(ticket.client_name)}</span><strong>${escape(ticket.client_name)}</strong><time>${relative(ticket.updated_at || ticket.created_at)}</time></div><h3>${escape(ticket.subject || 'Sem assunto')}</h3><p>${escape(ticket.messages?.at(-1)?.text || ticket.store_name || 'Aguardando primeira mensagem')}</p><footer>${priority(ticket.priority)}${sla(ticket)}</footer></button>`).join('') || '<p class="empty">Nenhum chamado nesta fila.</p>'}</div>
-        </aside>
-        <section class="conversation">${selected ? `<header class="conversation-head"><div><span class="avatar">${initials(selected.client_name)}</span><span><h2>${escape(selected.subject || 'Sem assunto')}</h2><p>${escape(selected.client_name)} Â· ${escape(selected.store_name || 'Geral')}</p></span></div><div>${priority(selected.priority)}${status(selected.status)}${!['resolved', 'closed'].includes(selected.status) ? `<button class="secondary small-button" data-action="resolve-ticket" data-id="${selected.id}">âœ“ Resolver</button>` : ''}</div></header>
-          <div class="conversation-meta"><span><small>CRIADO</small><strong>${date(selected.created_at)}</strong></span><span><small>ÃšLTIMA ATUALIZAÃ‡ÃƒO</small><strong>${relative(selected.updated_at || selected.created_at)}</strong></span><span><small>TEMPO NA FILA</small><strong>${sla(selected)}</strong></span><span><small>MENSAGENS</small><strong>${selected.messageCount ?? messages.length}</strong></span></div>
-          <div class="messages">${messages.map((message) => `<article class="message ${message.sender_type === 'admin' ? 'mine' : ''}"><span class="message-avatar">${message.sender_type === 'admin' ? 'C' : initials(selected.client_name)}</span><div><header><strong>${message.sender_type === 'admin' ? 'Equipe ChefOS' : escape(selected.client_name)}</strong><time>${date(message.created_at)}</time></header><p>${escape(message.text)}</p></div></article>`).join('') || '<div class="empty-conversation"><i>âœ¦</i><strong>Conversa ainda vazia</strong><small>Envie a primeira resposta para iniciar o atendimento.</small></div>'}</div>
-          <form data-form="reply" data-ticket="${selected.id}" class="composer"><textarea name="text" required maxlength="10000" placeholder="Escreva uma resposta para ${escape(selected.client_name)}..."></textarea><div class="composer-hint">Ctrl + Enter para enviar Â· a resposta fica registrada na auditoria</div><footer><label>Atualizar como <select name="status"><option value="in_progress">Em atendimento</option><option value="resolved">Resolvido</option><option value="open">Aberto</option></select></label><button class="primary" type="submit">Enviar resposta â†’</button></footer></form>` : '<div class="empty-conversation full"><i>âœ¦</i><strong>Selecione um chamado</strong><small>A conversa completa aparecerÃ¡ aqui.</small></div>'}</section>
-      </div>
-    </section>`;
-  }
-
-  function plans() {
-    const activeSubscriptions = state.tenants.map(subscriptionOf).filter((subscription) => subscription?.status === 'active' && subscription.entitlementActive);
-    const contractedMonthly = activeSubscriptions.reduce((total, subscription) => total + Number(planById(subscription.plan_id)?.price || 0), 0);
-    const integrationGaps = state.plans.filter((plan) => plan.recurring && !plan.preapproval_plan_id).length;
-    const planCards = state.plans.map((plan) => {
-      const subscribers = activeSubscriptions.filter((subscription) => String(subscription.plan_id) === String(plan.id)).length;
-      const linkedSubscriptions = state.tenants.filter((tenant) => String(subscriptionOf(tenant)?.plan_id) === String(plan.id)).length;
-      const permissions = (plan.plan_permissions || []).map((permission) => permission.permission_key);
-      const billingState = !plan.recurring ? '<span class="billing-state neutral">Pagamento Ãºnico</span>' : plan.preapproval_plan_id ? '<span class="billing-state ready">Mercado Pago conectado</span>' : '<span class="billing-state warning">RecorrÃªncia pendente</span>';
-      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${plan.recurring ? 'ASSINATURA' : 'ACESSO ÃšNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descriÃ§Ã£o comercial.')}</p></span><button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button></header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${plan.recurring ? '/ mÃªs' : ' pagamento Ãºnico'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluÃ­da(s)</small></span><span><strong>${permissions.length}</strong><small>mÃ³dulos</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>âœ“ ${escape(permissionLabel(key))}</span>`).join('') || '<span class="muted">Nenhum mÃ³dulo incluÃ­do</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} mÃ³dulos incluÃ­dos</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de teste</span><div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div></footer></article>`;
-    }).join('');
-    return `<section class="page">${pageHeader('ESTRATÃ‰GIA COMERCIAL', 'Planos e mÃ³dulos', 'Modele preÃ§o, recorrÃªncia, limites e acesso sem editar o banco manualmente.', `<button class="primary" data-action="open-plan">ï¼‹ Criar plano</button>`)}
-      ${integrationGaps ? `<div class="integration-warning"><span>!</span><div><strong>${integrationGaps} plano(s) recorrente(s) sem vÃ­nculo de cobranÃ§a</strong><p>Adicione o ID do plano de recorrÃªncia do Mercado Pago antes de comercializar esses planos.</p></div></div>` : ''}
-      <div class="summary-strip"><div><span>Planos no catÃ¡logo</span><strong>${state.plans.length}</strong></div><div><span>Acessos ativos</span><strong>${activeSubscriptions.length}</strong></div><div><span>Receita contratada</span><strong>${money(contractedMonthly)}</strong></div><div class="${integrationGaps ? 'warning-text' : ''}"><span>IntegraÃ§Ãµes pendentes</span><strong>${integrationGaps}</strong></div></div>
-      <div class="plan-grid">${planCards || '<div class="panel empty">Nenhum plano cadastrado.</div>'}</div></section>`;
-  }
-
-  function catalog() {
-    const selected = state.tenants.find((tenant) => String(tenant.accountId || tenant.id) === String(state.selectedTenant));
-    const customerOptions = state.tenants.map((tenant) => `<option value="${tenant.accountId || tenant.id}" ${String(tenant.accountId || tenant.id) === String(state.selectedTenant) ? 'selected' : ''}>${escape(tenant.full_name)} â€” ${tenant.stores?.length || 0} loja(s)</option>`).join('');
-    const storeOptions = (selected?.stores || []).map((store) => `<option value="${store.storeId || store.id}" ${String(store.storeId || store.id) === String(state.selectedStore) ? 'selected' : ''}>${escape(store.name)}</option>`).join('');
-    const query = state.filters.catalog;
-    const category = state.filters.catalogCategory;
-    const availability = state.filters.catalogStatus;
-    const rows = state.menu.filter((item) => {
-      const matchesText = !query || includes(`${item.name} ${item.description || ''} ${item.categories?.name || ''} ${item.external_code || ''}`, query);
-      const matchesCategory = category === 'all' || String(item.category_id) === String(category);
-      const matchesAvailability = availability === 'all' || (availability === 'available' ? item.is_available : !item.is_available);
-      return matchesText && matchesCategory && matchesAvailability;
-    });
-    const meta = state.menuMeta || { total: 0, available: 0, paused: 0, averagePrice: 0 };
-    const contextActions = `<div class="catalog-context"><label><span>CLIENTE</span><select data-action="select-tenant" aria-label="Selecionar cliente">${customerOptions}</select></label><label><span>OPERAÃ‡ÃƒO</span><select data-action="select-store" aria-label="Selecionar operaÃ§Ã£o" ${storeOptions ? '' : 'disabled'}>${storeOptions || '<option>Sem loja cadastrada</option>'}</select></label></div>`;
-    return `<section class="page">${pageHeader('OPERAÃ‡ÃƒO DO PRODUTO', 'GestÃ£o de cardÃ¡pios', 'Consulte e edite os itens da loja correta com todas as aÃ§Ãµes passando pela API.', contextActions)}
-      <div class="summary-strip catalog-summary"><div><span>Cliente</span><strong>${escape(selected?.full_name || 'â€”')}</strong></div><div><span>Itens</span><strong>${meta.total || 0}</strong></div><div><span>DisponÃ­veis</span><strong>${meta.available || 0}</strong></div><div><span>Pausados</span><strong>${meta.paused || 0}</strong></div><div><span>PreÃ§o mÃ©dio</span><strong>${money(meta.averagePrice)}</strong></div></div>
-      <div class="data-toolbar"><div class="search-field"><span>âŒ•</span><input data-search="catalog" value="${escape(query)}" placeholder="Buscar item, categoria ou cÃ³digo" /></div><select data-filter="catalogCategory" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option>${state.menuCategories.map((item) => `<option value="${item.id}" ${String(category) === String(item.id) ? 'selected' : ''}>${escape(item.name)}</option>`).join('')}</select><select data-filter="catalogStatus" aria-label="Filtrar disponibilidade"><option value="all" ${availability === 'all' ? 'selected' : ''}>Todos os itens</option><option value="available" ${availability === 'available' ? 'selected' : ''}>DisponÃ­veis</option><option value="paused" ${availability === 'paused' ? 'selected' : ''}>Pausados</option></select><button class="primary" data-action="open-catalog-item" ${state.selectedStore ? '' : 'disabled'}>ï¼‹ Novo item</button><span class="result-count">${rows.length} resultado(s)</span></div>
-      <div class="panel table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>PreÃ§o</th><th>Preparo</th><th>Disponibilidade</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.name)}</strong><small>${escape(item.description || item.external_code || `ID ${String(item.id).slice(0, 8)}`)}</small></td><td>${escape(item.categories?.name || 'Geral')}</td><td><strong>${money(item.price)}</strong></td><td><strong>${item.prep_time_in_minutes || 0} min</strong></td><td><span class="availability ${item.is_available ? 'on' : 'off'}"><i></i>${item.is_available ? 'DisponÃ­vel' : 'Pausado'}</span></td><td><div class="row-actions"><button class="row-action" data-action="edit-catalog-item" data-id="${item.id}">Editar</button><button class="row-action" data-action="toggle-menu" data-id="${item.id}" data-available="${item.is_available}">${item.is_available ? 'Pausar' : 'Ativar'}</button></div></td></tr>`).join('') || `<tr><td colspan="6" class="empty">${state.selectedStore ? 'Nenhum item encontrado nesta operaÃ§Ã£o.' : 'Selecione um cliente com loja para gerenciar o cardÃ¡pio.'}</td></tr>`}</tbody></table></div>
-    </section>`;
-  }
-
-  function provision() {
-    return `<section class="page onboarding-page">${pageHeader('NOVO CLIENTE', 'Onboarding ChefOS', 'Crie a conta, a operaÃ§Ã£o e o acesso inicial em um Ãºnico fluxo.', '')}
-      <div class="onboarding-layout"><aside class="onboarding-steps"><span class="active"><i>1</i><strong>Criar acesso</strong><small>Nome, e-mail e senha</small></span><span><i>2</i><strong>Configurar operaÃ§Ã£o</strong><small>Empresa e loja principal</small></span><span><i>3</i><strong>Ativar plano</strong><small>Teste, mÃ³dulos e estrutura</small></span><div class="onboarding-note"><strong>Sem UUID manual</strong><p>A API cria a conta no Supabase Auth e usa o identificador internamente. Se o e-mail jÃ¡ existir, a conta Ã© reutilizada sem trocar sua senha.</p></div></aside>
-        <form class="panel onboarding-form" data-form="provision"><div class="onboarding-intro"><span>âœ¦</span><div><strong>AtivaÃ§Ã£o completa em uma aÃ§Ã£o</strong><p>Ao finalizar, o cliente poderÃ¡ entrar no ChefOS com o e-mail e a senha inicial definidos abaixo.</p></div></div><div class="form-section"><span class="section-number">01</span><div><h2>Acesso do proprietÃ¡rio</h2><p class="muted">Estes dados criam a conta real do cliente.</p></div></div><div class="form-grid"><label>Nome completo<input name="fullName" required maxlength="160" autocomplete="off" placeholder="Ex.: Mariana Costa" /></label><label>E-mail de acesso<input name="email" type="email" required maxlength="254" autocomplete="off" placeholder="mariana@restaurante.com" /></label><label class="wide password-field">Senha inicial<span><input name="initialPassword" type="text" required minlength="10" maxlength="128" autocomplete="off" placeholder="MÃ­nimo de 10 caracteres" /><button type="button" class="secondary" data-action="generate-password">Gerar senha segura</button></span><small>Guarde esta senha para entregar ao cliente. Ela nÃ£o serÃ¡ salva no painel.</small></label></div><hr/><div class="form-section"><span class="section-number">02</span><div><h2>Empresa e operaÃ§Ã£o</h2><p class="muted">Dados usados na loja principal e no perfil empresarial.</p></div></div><div class="form-grid"><label>Nome da operaÃ§Ã£o<input name="storeName" required maxlength="180" placeholder="Ex.: BistrÃ´ Central" /></label><label>CNPJ<input name="cnpj" required maxlength="30" placeholder="00.000.000/0001-00" /></label><label>Telefone<input name="phone" maxlength="40" placeholder="(00) 00000-0000" /></label><label>EndereÃ§o<input name="address" maxlength="300" placeholder="Rua, nÃºmero, bairro e cidade" /></label></div><hr/><div class="form-section"><span class="section-number">03</span><div><h2>Plano e ativaÃ§Ã£o</h2><p class="muted">O perÃ­odo de teste e os limites seguem o plano selecionado.</p></div></div><label>Plano ChefOS<select name="planId" required><option value="">Selecione o plano</option>${state.plans.map((plan) => `<option value="${plan.id}">${escape(plan.name)} â€” ${money(plan.price)}${plan.recurring ? '/mÃªs' : ''} Â· ${plan.trial_period_days || 0} dias de teste</option>`).join('')}</select></label><label class="confirmation-check"><input type="checkbox" name="confirm" required /><span><strong>Confirmo a criaÃ§Ã£o desta conta e estrutura</strong><small>SerÃ¡ criado o usuÃ¡rio, perfil, loja, assinatura, mÃ³dulos, salÃ£o e seis mesas.</small></span></label><footer><span><i>âœ“</i> Todo o fluxo usa APIs administrativas auditadas</span><button class="primary" type="submit">Criar cliente e ativar ChefOS â†’</button></footer></form>
-      </div></section>`;
-  }
-
-  function legacyHealth() {
-    const data = state.health || {};
-    const healthy = data.status === 'healthy';
-    return `<section class="page">${pageHeader('OBSERVABILIDADE', 'SaÃºde do sistema', 'Conectividade, ambiente e desempenho dos serviÃ§os administrativos.', `<button class="secondary" data-action="reload-health">â†» Executar verificaÃ§Ã£o</button>`)}
-      <div class="health-hero ${healthy ? 'healthy' : 'degraded'}"><div><i>${healthy ? 'âœ“' : '!'}</i><span><small>STATUS GERAL</small><strong>${healthy ? 'Tudo operacional' : 'AtenÃ§Ã£o necessÃ¡ria'}</strong><p>${healthy ? 'Os serviÃ§os principais responderam normalmente.' : 'Uma ou mais verificaÃ§Ãµes precisam de atenÃ§Ã£o.'}</p></span></div><span><small>LATÃŠNCIA TOTAL</small><strong>${data.latencyMs ?? 'â€”'} ms</strong></span></div>
-      <div class="check-grid">${Object.entries(data.checks || {}).map(([name, check]) => `<article class="panel check-card"><header><span class="check-icon ${check.status}">${check.status === 'ok' ? 'âœ“' : '!'}</span>${status(check.status === 'ok' ? 'active' : 'past_due')}</header><h2>${escape(name)}</h2><p>${escape(check.message || '')}</p><footer><span>LatÃªncia</span><strong>${check.latencyMs ?? 'â€”'} ms</strong></footer></article>`).join('') || '<div class="panel empty">Execute a verificaÃ§Ã£o para carregar os serviÃ§os.</div>'}</div>
-      ${data.system ? `<div class="panel system-info"><div><span>Node.js</span><strong>${escape(data.system.nodeVersion)}</strong></div><div><span>Uptime</span><strong>${data.system.uptimeSeconds}s</strong></div><div><span>MemÃ³ria</span><strong>${data.system.memoryUsageMB} MB</strong></div><div><span>Ãšltima verificaÃ§Ã£o</span><strong>${date(data.timestamp)}</strong></div></div>` : ''}
-    </section>`;
-  }
-
-  function legacyLogs() {
-    return `<section class="page">${pageHeader('GOVERNANÃ‡A', 'Auditoria do sistema', 'Ãšltimos eventos registrados pelas operaÃ§Ãµes administrativas.', `<button class="secondary" data-action="reload-logs">â†» Atualizar eventos</button>`)}
-      <div class="panel timeline">${(state.logs || []).map((log) => `<article><span class="timeline-dot"></span><div><header><strong>${escape(log.action || log.event_type || 'Evento')}</strong><time>${date(log.created_at)}</time></header><p>${escape(typeof log.details === 'object' ? JSON.stringify(log.details) : log.description || log.details || 'Sem descriÃ§Ã£o adicional')}</p></div></article>`).join('') || '<p class="empty">Nenhum evento de auditoria encontrado.</p>'}</div>
-    </section>`;
-  }
-
-  function legacyAdministrators() {
-    return `<section class="page">${pageHeader('SEGURANÃ‡A E ACESSO', 'Administradores', 'Controle quem pode operar o Control Center do ChefOS.', '')}
-      <div class="access-layout"><div class="panel"><div class="panel-heading"><div><p class="eyebrow">EQUIPE</p><h2>Acessos ativos</h2></div><span class="count-badge">${state.admins?.length || 0}</span></div><div class="admin-list">${(state.admins || []).map((admin) => `<div><span class="avatar">${initials(admin.email)}</span><span><strong>${escape(admin.email)}</strong><small>${admin.protected ? 'Administrador raiz' : 'Administrador'} Â· desde ${day(admin.created_at)}</small></span>${admin.protected ? '<span class="root-badge">Protegido</span>' : `<button class="danger-link" data-action="delete-admin" data-email="${escape(admin.email)}">Remover</button>`}</div>`).join('') || '<p class="empty">Nenhum administrador encontrado.</p>'}</div></div>
-        <form class="panel invite-card" data-form="admin"><span class="invite-icon">ï¼‹</span><p class="eyebrow">NOVO ACESSO</p><h2>Adicionar administrador</h2><p class="muted">O usuÃ¡rio precisa existir no Supabase Auth para conseguir entrar.</p><label>E-mail corporativo<input name="email" type="email" required placeholder="nome@chefos.online" /></label><button class="primary" type="submit">Autorizar acesso</button></form></div>
-    </section>`;
-  }
-
-  function healthCheckCard(item) {
-    const action = item.action?.section
-      ? `<button class='text-button' data-action='health-navigate' data-section='${escape(item.action.section)}' data-filter='${escape(item.action.filter || '')}'>Investigar â†’</button>`
-      : '';
-    return `<article class='health-check health-${escape(item.status)}'><span class='health-check-icon'>${item.status === 'ok' ? 'âœ“' : item.status === 'unknown' ? '?' : '!'}</span><div><header><strong>${escape(item.label)}</strong><span>${escape(healthStatusLabel(item.status))}</span></header><p>${escape(item.message || '')}</p>${item.latencyMs !== undefined ? `<small>${item.latencyMs} ms</small>` : item.value !== undefined ? `<small>Valor observado: ${item.value}</small>` : ''}</div>${action}</article>`;
-  }
-
-  function health() {
-    const data = state.health || {};
-    const labels = {
-      healthy: ['Tudo operacional', 'Os fluxos essenciais responderam normalmente.', 'âœ“'],
-      attention: ['Pontos de atenÃ§Ã£o', 'Existem configuraÃ§Ãµes ou indicadores que merecem acompanhamento.', '!'],
-      degraded: ['OperaÃ§Ã£o degradada', 'Um ou mais fluxos do ChefOS precisam de intervenÃ§Ã£o.', '!'],
-      critical: ['Incidente crÃ­tico', 'Um serviÃ§o essencial nÃ£o respondeu corretamente.', '!'],
-      unknown: ['Estado desconhecido', 'Ainda nÃ£o existem informaÃ§Ãµes suficientes para o diagnÃ³stico.', '?']
-    };
-    const hero = labels[data.status] || labels.unknown;
-    const summary = data.summary || { operational: 0, attention: 0, degraded: 0, total: 0 };
-    const groups = [
-      ['core', 'Infraestrutura', 'Banco, autenticaÃ§Ã£o e configuraÃ§Ã£o administrativa.'],
-      ['business', 'SaÃºde do negÃ³cio', 'Assinaturas, cobranÃ§as, integraÃ§Ãµes e suporte.'],
-      ['security', 'SeguranÃ§a', 'Acessos privilegiados, MFA e modelo de autorizaÃ§Ã£o.']
-    ];
-    return `<section class='page health-center'>${pageHeader('CENTRO DE CONFIABILIDADE', 'SaÃºde do ChefOS', 'Disponibilidade tÃ©cnica, fluxos do negÃ³cio e seguranÃ§a em uma Ãºnica visÃ£o.', can('health.run') ? `<button class='primary' data-action='reload-health'>â†» Executar diagnÃ³stico</button>` : '')}
-      <div class='health-hero health-overall-${escape(data.status || 'unknown')}'><div><i>${hero[2]}</i><span><small>STATUS GERAL</small><strong>${hero[0]}</strong><p>${hero[1]}</p></span></div><span><small>ÃšLTIMA VERIFICAÃ‡ÃƒO</small><strong>${data.timestamp ? relative(data.timestamp) : 'â€”'}</strong><p>${data.latencyMs ?? 'â€”'} ms Â· deploy ${escape(data.system?.deployment || 'local')}</p></span></div>
-      <div class='summary-strip health-summary'><div><span>VerificaÃ§Ãµes</span><strong>${summary.total}</strong></div><div><span>Operacionais</span><strong class='success-text'>${summary.operational}</strong></div><div><span>AtenÃ§Ã£o</span><strong class='warning-text'>${summary.attention}</strong></div><div><span>Degradadas</span><strong class='danger-text'>${summary.degraded}</strong></div></div>
-      <div class='health-domain-grid'>${groups.map(([key, title, description]) => `<section class='panel health-domain'><header><span><p class='eyebrow'>${escape(key.toUpperCase())}</p><h2>${title}</h2><small>${description}</small></span><b>${data.groups?.[key]?.length || 0}</b></header><div>${(data.groups?.[key] || []).map(healthCheckCard).join('') || `<p class='empty'>Sem verificaÃ§Ãµes disponÃ­veis.</p>`}</div></section>`).join('')}</div>
-      <div class='health-lower-grid'><section class='panel health-history'><div class='panel-heading'><div><p class='eyebrow'>HISTÃ“RICO</p><h2>Ãšltimos diagnÃ³sticos</h2></div><span class='count-badge'>${data.history?.length || 0}</span></div><div class='health-history-track'>${(data.history || []).map((item) => `<span class='history-${escape(item.overall_status)}' title='${escape(`${date(item.checked_at)} Â· ${healthStatusLabel(item.overall_status)}`)}'><i></i><small>${day(item.checked_at)}</small></span>`).join('') || `<p class='empty'>O histÃ³rico comeÃ§a apÃ³s o primeiro diagnÃ³stico manual.</p>`}</div></section><section class='panel incident-list'><div class='panel-heading'><div><p class='eyebrow'>INCIDENTES</p><h2>Acompanhamento ativo</h2></div><span class='count-badge'>${data.incidents?.length || 0}</span></div>${(data.incidents || []).map((incident) => `<article><span class='severity severity-${escape(incident.severity)}'>${escape(incident.severity)}</span><div><strong>${escape(incident.title)}</strong><small>${escape(incident.service)} Â· iniciado ${relative(incident.started_at)}</small></div><span>${escape(incident.status)}</span></article>`).join('') || `<div class='all-clear'><i>âœ“</i><span><strong>Nenhum incidente aberto</strong><small>A operaÃ§Ã£o nÃ£o possui incidentes registrados.</small></span></div>`}</section></div>
-    </section>`;
-  }
-
-  function auditDescription(event) {
-    if (event.reason) return event.reason;
-    const target = [event.target_type, event.target_id].filter(Boolean).join(' Â· ');
-    if (target) return target;
-    if (event.metadata?.description) return event.metadata.description;
-    return 'Evento administrativo registrado com sucesso.';
-  }
-
-  function logs() {
-    const payload = state.logs || { data: [], summary: {}, meta: {}, catalogs: {} };
-    const summary = payload.summary || {};
-    const meta = payload.meta || { page: 1, pages: 1, total: 0 };
-    const filters = state.filters;
-    return `<section class='page audit-center'>${pageHeader('GOVERNANÃ‡A E CONTROLE', 'Auditoria administrativa', 'Descubra quem fez o quÃª, quando, onde e com qual resultado.', `<button class='secondary' data-action='export-audit' ${can('audit.export') ? '' : 'disabled'}>â†“ Exportar CSV</button><button class='secondary' data-action='reload-logs'>â†» Atualizar</button>`)}
-      ${meta.legacy ? `<div class='migration-banner'><i>!</i><span><strong>Auditoria em modo de compatibilidade</strong><small>Aplique a migraÃ§Ã£o para habilitar filtros estruturados, antes/depois e resultado das operaÃ§Ãµes.</small></span></div>` : ''}
-      <div class='summary-strip audit-summary'><div><span>Eventos encontrados</span><strong>${summary.total || 0}</strong></div><div><span>Alto risco nesta pÃ¡gina</span><strong class='danger-text'>${summary.highRisk || 0}</strong></div><div><span>Falhas e bloqueios</span><strong class='warning-text'>${summary.failures || 0}</strong></div><div><span>Atores nesta pÃ¡gina</span><strong>${summary.actors || 0}</strong></div></div>
-      <form class='panel audit-filters' data-form='audit-filter'><label class='audit-search'><span>âŒ•</span><input name='q' value='${escape(filters.auditQuery)}' placeholder='Buscar aÃ§Ã£o, recurso ou identificador' /></label><select name='category' aria-label='Categoria'><option value='all'>Todas as categorias</option>${(payload.catalogs?.categories || []).map((item) => `<option value='${escape(item.key)}' ${filters.auditCategory === item.key ? 'selected' : ''}>${escape(item.label)}</option>`).join('')}</select><select name='outcome' aria-label='Resultado'><option value='all'>Todos os resultados</option><option value='success' ${filters.auditOutcome === 'success' ? 'selected' : ''}>Sucesso</option><option value='failure' ${filters.auditOutcome === 'failure' ? 'selected' : ''}>Falha</option><option value='blocked' ${filters.auditOutcome === 'blocked' ? 'selected' : ''}>Bloqueado</option></select><input name='actor' value='${escape(filters.auditActor)}' placeholder='E-mail do ator' /><label class='date-filter'>De<input name='from' type='date' value='${escape(filters.auditFrom)}' /></label><label class='date-filter'>AtÃ©<input name='to' type='date' value='${escape(filters.auditTo)}' /></label><button class='primary' type='submit'>Aplicar filtros</button><button class='text-button' type='button' data-action='clear-audit-filters'>Limpar</button></form>
-      <div class='panel table-wrap audit-table'><table><thead><tr><th>Data e hora</th><th>Evento</th><th>Ator</th><th>Categoria</th><th>Resultado</th><th>Risco</th><th></th></tr></thead><tbody>${(payload.data || []).map((event) => `<tr><td><strong>${date(event.created_at)}</strong><small>${event.request_id ? `Req. ${escape(String(event.request_id).slice(0, 12))}` : 'Sem correlaÃ§Ã£o'}</small></td><td><strong>${escape(event.actionLabel || event.action)}</strong><small>${escape(auditDescription(event))}</small></td><td><strong>${escape(event.actor_email || 'NÃ£o identificado')}</strong><small>${event.target_type ? `${escape(event.target_type)} Â· ${escape(event.target_id || 'â€”')}` : 'AÃ§Ã£o administrativa'}</small></td><td><span class='category-pill'>${escape(event.categoryLabel || event.category)}</span></td><td><span class='outcome outcome-${escape(event.outcome)}'>${escape(auditOutcomeLabel(event.outcome))}</span></td><td><span class='severity severity-${escape(event.severity)}'>${escape(event.severity || 'low')}</span></td><td><button class='row-action' data-action='view-audit' data-id='${escape(event.id)}'>Detalhes</button></td></tr>`).join('') || `<tr><td colspan='7' class='empty'>Nenhum evento corresponde aos filtros.</td></tr>`}</tbody></table></div>
-      <footer class='pagination'><span>PÃ¡gina ${meta.page || 1} de ${meta.pages || 1} Â· ${meta.total || 0} evento(s)</span><div><button class='secondary' data-action='audit-page' data-page='${Math.max(1, (meta.page || 1) - 1)}' ${(meta.page || 1) <= 1 ? 'disabled' : ''}>â† Anterior</button><button class='secondary' data-action='audit-page' data-page='${Math.min(meta.pages || 1, (meta.page || 1) + 1)}' ${(meta.page || 1) >= (meta.pages || 1) ? 'disabled' : ''}>PrÃ³xima â†’</button></div></footer>
-    </section>`;
-  }
-
-  function administrators() {
-    const summary = state.adminSummary || { total: state.admins?.length || 0, active: 0, invited: 0, suspended: 0, withoutMfa: 0 };
-    const canManage = Boolean(state.adminMeta?.canManage && can('access.manage'));
-    return `<section class='page access-center'>${pageHeader('IDENTIDADE E SEGURANÃ‡A', 'Acessos administrativos', 'Gerencie o ciclo de vida da equipe, funÃ§Ãµes e segundo fator.', '')}
-      ${state.adminMeta?.legacySchema ? `<div class='migration-banner critical'><i>!</i><span><strong>ProteÃ§Ã£o avanÃ§ada ainda nÃ£o aplicada no banco</strong><small>O painel estÃ¡ compatÃ­vel, mas papÃ©is, suspensÃ£o e bloqueio direto por RLS dependem da migraÃ§Ã£o SQL.</small></span></div>` : ''}
-      <div class='summary-strip access-summary'><div><span>Total da equipe</span><strong>${summary.total || 0}</strong></div><div><span>Ativos</span><strong class='success-text'>${summary.active || 0}</strong></div><div><span>Convites pendentes</span><strong>${summary.invited || 0}</strong></div><div><span>Suspensos</span><strong class='warning-text'>${summary.suspended || 0}</strong></div><div><span>Privilegiados sem MFA</span><strong class='danger-text'>${summary.withoutMfa || 0}</strong></div></div>
-      <div class='access-workspace'><section class='panel access-team'><div class='panel-heading'><div><p class='eyebrow'>EQUIPE ADMINISTRATIVA</p><h2>Pessoas e permissÃµes</h2></div><span class='count-badge'>${state.admins?.length || 0}</span></div><div class='access-table'>${(state.admins || []).map((admin) => `<article><span class='avatar'>${initials(admin.display_name || admin.email)}</span><div class='access-person'><strong>${escape(admin.display_name || admin.email.split('@')[0])}</strong><small>${escape(admin.email)}</small></div><div><small>FUNÃ‡ÃƒO</small><strong>${escape(roleLabel(admin.role))}</strong></div><div><small>STATUS</small><span class='access-status access-${escape(admin.status)}'><i></i>${escape(accessStatusLabel(admin.status))}</span></div><div><small>SEGURANÃ‡A</small><span class='mfa-state ${admin.mfaEnabled ? 'enabled' : 'missing'}'>${admin.mfaEnabled ? 'âœ“ MFA ativo' : admin.mfa_required ? '! MFA pendente' : 'MFA opcional'}</span></div><div><small>ÃšLTIMA ATIVIDADE</small><strong>${relative(admin.last_sign_in_at || admin.last_seen_at)}</strong></div>${admin.protected ? `<span class='root-badge'>Raiz protegido</span>` : canManage && (admin.role !== 'owner' || state.adminMeta?.canManageOwners) ? `<button class='row-action' data-action='manage-admin' data-email='${escape(admin.email)}'>Gerenciar</button>` : `<span class='read-only-label'>Somente leitura</span>`}</article>`).join('') || `<p class='empty'>Nenhum administrador encontrado.</p>`}</div></section>
-        <form class='panel invite-card access-invite' data-form='admin'><span class='invite-icon'>ï¼‹</span><p class='eyebrow'>NOVO ACESSO</p><h2>Convidar para a equipe</h2><p class='muted'>O ChefOS enviarÃ¡ um convite real e registrarÃ¡ a concessÃ£o na auditoria.</p><label>Nome completo<input name='displayName' required maxlength='160' placeholder='Ex.: Ana Martins' /></label><label>E-mail corporativo<input name='email' type='email' required maxlength='254' placeholder='ana@chefos.online' /></label><label>FunÃ§Ã£o<select name='role' required>${state.adminRoles.map((role) => `<option value='${escape(role.key)}'>${escape(role.label)} â€” ${escape(role.description)}</option>`).join('') || `<option value='support'>Suporte</option>`}</select></label><label>Motivo do acesso<textarea name='reason' required minlength='5' maxlength='500' placeholder='Ex.: nova responsÃ¡vel pelo atendimento'></textarea></label><label class='confirmation-check'><input type='checkbox' name='mfaRequired' checked /><span><strong>Exigir segundo fator</strong><small>ObrigatÃ³rio para funÃ§Ãµes privilegiadas.</small></span></label><button class='primary' type='submit' ${canManage ? '' : 'disabled'}>Enviar convite seguro â†’</button></form></div>
-    </section>`;
-  }
-
-  function beta() {
-    const labels = { new: 'Nova', review: 'Em anÃ¡lise', contact: 'Contato', interview: 'Entrevista', approved: 'Aprovada', onboarding: 'Onboarding', active: 'Beta ativo', completed: 'ConcluÃ­da', converted: 'Convertida', closed: 'Encerrada' };
-    const stages = Object.keys(labels);
-    const rows = state.betaApplications || [];
-    return `<section class='page'>${pageHeader('PARCEIROS FUNDADORES', 'Candidaturas do beta', 'Acompanhe cada restaurante desde a candidatura atÃ© o inÃ­cio do programa.', `<button class='secondary' data-action='reload-beta'>â†» Atualizar</button>`)}
-      <div class='summary-strip'>${['new','review','contact','interview','approved','onboarding','active'].map((key) => `<div><span>${labels[key]}</span><strong>${state.betaSummary?.[key] || 0}</strong></div>`).join('')}</div>
-      <div class='panel table-wrap'><table><thead><tr><th>Restaurante</th><th>ResponsÃ¡vel</th><th>Contato</th><th>Etapa</th><th>Entrada</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.restaurant_name)}</strong><small>${escape(item.establishment_type || item.restaurant_size || 'Perfil nÃ£o informado')}</small></td><td><strong>${escape(item.name)}</strong><small>${item.consent_marketing ? 'Aceitou comunicaÃ§Ãµes' : 'Somente comunicaÃ§Ãµes do programa'}</small></td><td><strong>${escape(item.email)}</strong><small>${escape(item.phone || 'Sem telefone')}</small></td><td><select data-action='beta-status' data-id='${escape(item.id)}'>${stages.map((key) => `<option value='${key}' ${item.status === key ? 'selected' : ''}>${labels[key]}</option>`).join('')}</select></td><td><strong>${day(item.submitted_at)}</strong><small>${relative(item.submitted_at)}</small></td><td>${['approved','onboarding'].includes(item.status) && !item.participant ? `<button class='row-action' data-action='convert-beta' data-id='${escape(item.id)}'>Criar participante</button>` : item.participant ? `<span class='health-signal success'><i></i>Participante</span>` : ''}</td></tr>`).join('') || `<tr><td colspan='6' class='empty'>Nenhuma candidatura recebida ainda.</td></tr>`}</tbody></table></div>
-    </section>`;
-  }
-
-  function activePage() {
-    const pages = { overview, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
-    return pages[state.section]();
-  }
-
-  function subscriptionModal(tenant) {
-    const subscription = subscriptionOf(tenant) || {};
-    const accountId = tenant.accountId || tenant.id;
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GESTÃƒO DE ACESSO</p><h2 id="modal-title">Assinatura de ${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">Ã—</button></header><div class="modal-body"><input type="hidden" name="accountId" value="${accountId}"/><div class="modal-alert"><strong>AtenÃ§Ã£o Ã  cobranÃ§a</strong><p>Esta aÃ§Ã£o altera o acesso interno. A recorrÃªncia do Mercado Pago ainda precisa ser gerenciada separadamente.</p></div><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="unpaid" ${subscription.status === 'unpaid' ? 'selected' : ''}>NÃ£o paga</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} â€” ${money(plan.price)}/mÃªs</option>`).join('')}</select></label><label>Fim do perÃ­odo atual<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" ${subscription.id ? '' : 'required'} /></label><label>Motivo da alteraÃ§Ã£o<textarea name="reason" required minlength="5" maxlength="500" placeholder="Ex.: pagamento confirmado manualmente pelo financeiro"></textarea></label><div class="modal-summary"><span><small>SAÃšDE DO ACESSO</small><strong>${entitlement(subscription)}</strong></span><span><small>VALOR DO PLANO</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar com auditoria</button></footer></form></div>`;
-  }
-
-  function tenantModal(tenant) {
-    const subscription = subscriptionOf(tenant) || {};
-    const plan = planById(subscription.plan_id);
-    const accountId = tenant.accountId || tenant.id;
-    const missingLabels = { store: 'Criar loja principal', company_profile: 'Completar perfil da empresa', company_data: 'Completar dados fiscais da empresa', subscription: 'Configurar assinatura' };
-    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">Ã—</button></header><div class="drawer-title"><p class="eyebrow">VISÃƒO 360Âº DO CLIENTE</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p><div class="drawer-signals">${subscription ? status(subscription.status) : status('unknown')}${entitlement(subscription)}${onboarding(tenant)}</div></div><div class="detail-grid"><span><small>PLANO</small><strong>${escape(plan?.name || 'Sem plano')}</strong></span><span><small>VALOR CONTRATADO</small><strong>${money(plan?.price)}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>ÃšLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span><span><small>CHAMADOS ABERTOS</small><strong>${tenant.support?.openTickets || 0}</strong></span><span><small>PRIORITÃRIOS</small><strong>${tenant.support?.urgentTickets || 0}</strong></span></div>${tenant.onboarding?.missing?.length ? `<section class="drawer-checklist"><div class="panel-heading"><h3>PrÃ³ximas aÃ§Ãµes</h3><span class="count-badge">${tenant.onboarding.missing.length}</span></div>${tenant.onboarding.missing.map((item) => `<div><i>!</i><span><strong>${escape(missingLabels[item] || item)}</strong><small>NecessÃ¡rio para concluir o onboarding</small></span></div>`).join('')}</section>` : '<div class="drawer-all-clear"><i>âœ“</i><span><strong>Onboarding completo</strong><small>Estrutura mÃ­nima pronta para operar.</small></span></div>'}<section><div class="panel-heading"><h3>OperaÃ§Ãµes</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>â—«</span><span><strong>${escape(store.name)}</strong><small>ID ${escape(String(store.storeId || store.id).slice(0, 8))} Â· criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma operaÃ§Ã£o vinculada.</p>'}</div></section><footer><button class="secondary" data-action="edit-subscription" data-id="${accountId}">Gerenciar assinatura</button><button class="primary" data-action="tenant-catalog" data-id="${accountId}">Ver cardÃ¡pio</button></footer></aside></div>`;
-  }
-
-  function planModal() {
-    const source = state.modal?.id ? state.plans.find((plan) => String(plan.id) === String(state.modal.id)) : null;
-    const duplicate = Boolean(state.modal?.duplicate);
-    const editing = Boolean(source && !duplicate);
-    const selectedPermissions = new Set((source?.plan_permissions || []).map((permission) => permission.permission_key));
-    const catalogKeys = new Set(permissionDefinitions().map((permission) => permission.key));
-    const legacyPermissions = [...selectedPermissions].filter((key) => !catalogKeys.has(key));
-    const selectedCount = selectedPermissions.size;
-    const name = duplicate ? `${source?.name || ''} CÃ³pia` : source?.name || '';
-    const slug = duplicate ? `${source?.slug || 'plano'}-copia` : source?.slug || '';
-    const recurring = source ? source.recurring !== false : true;
-    const preapprovalPlanId = duplicate ? '' : source?.preapproval_plan_id || '';
-    const permissionGroups = state.permissionCatalog.map((group) => {
-      const groupSelected = group.permissions.filter((permission) => selectedPermissions.has(permission.key)).length;
-      return `<section class="permission-group" data-permission-group="${escape(group.id)}"><header><span><strong>${escape(group.name)}</strong><small>${escape(group.description)}</small></span><span><b data-permission-group-count>${groupSelected}/${group.permissions.length}</b><button type="button" data-action="toggle-permission-group">${groupSelected === group.permissions.length ? 'Desmarcar grupo' : 'Selecionar grupo'}</button></span></header><div class="permission-options">${group.permissions.map((permission) => `<label class="permission-option" data-permission-text="${escape(`${permission.name} ${permission.description} ${group.name}`)}"><input type="checkbox" name="permissions" value="${escape(permission.key)}" ${selectedPermissions.has(permission.key) ? 'checked' : ''}/><i>âœ“</i><span><strong>${escape(permission.name)}</strong><small>${escape(permission.description)}</small></span></label>`).join('')}</div></section>`;
-    }).join('');
-    const preservedLegacy = legacyPermissions.map((key) => `<input type="hidden" name="permissions" value="${escape(key)}"/>`).join('');
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal plan-modal" data-form="plan"><header><div><p class="eyebrow">CATÃLOGO COMERCIAL</p><h2 id="modal-title">${editing ? `Editar ${escape(source.name)}` : duplicate ? 'Duplicar plano' : 'Criar novo plano'}</h2><p>Configure a oferta comercial e escolha visualmente os mÃ³dulos incluÃ­dos.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">Ã—</button></header><div class="modal-body"><input type="hidden" name="id" value="${editing ? source.id : ''}"/><div class="form-grid"><label>Nome do plano<input name="name" required maxlength="120" value="${escape(name)}" placeholder="Profissional" /></label><label>Identificador interno<input name="slug" required maxlength="80" pattern="[a-z0-9_-]+" value="${escape(slug)}" placeholder="profissional" /></label><label class="wide">DescriÃ§Ã£o comercial<textarea name="description" maxlength="500" placeholder="Para quem Ã© este plano e qual seu principal benefÃ­cio?">${escape(source?.description || '')}</textarea></label><label>PreÃ§o<input name="price" type="number" step="0.01" min="0" required value="${source?.price ?? ''}" placeholder="199,00" /></label><label>MÃ¡ximo de lojas<input name="stores" type="number" min="1" step="1" required value="${source?.max_stores || 1}" /></label><label>PerÃ­odo de teste (dias)<input name="trial" type="number" min="0" step="1" value="${source?.trial_period_days || 0}" /></label><label>DescriÃ§Ã£o no Mercado Pago<input name="mpReason" maxlength="255" value="${escape(source?.mp_reason || '')}" placeholder="ChefOS Profissional" /></label><label class="wide">ID do plano recorrente no Mercado Pago<input name="preapprovalPlanId" maxlength="255" value="${escape(preapprovalPlanId)}" placeholder="2c938084..." /><small>Ao duplicar um plano, este vÃ­nculo nÃ£o Ã© copiado.</small></label></div><div class="choice-grid"><label><input type="checkbox" name="recurring" ${recurring ? 'checked' : ''}/><span><strong>CobranÃ§a recorrente</strong><small>RenovaÃ§Ã£o mensal do acesso</small></span></label><label><input type="checkbox" name="popular" ${source?.isMostPopular && !duplicate ? 'checked' : ''}/><span><strong>Destacar como mais popular</strong><small>Remove o destaque dos demais planos</small></span></label></div><section class="permission-picker"><header><div><p class="eyebrow">MÃ“DULOS INCLUÃDOS</p><h3>O que o cliente poderÃ¡ usar?</h3><small>Selecione pelas funÃ§Ãµes do ChefOS, sem precisar conhecer cÃ³digos internos.</small></div><strong data-permission-count>${selectedCount} mÃ³dulo(s) selecionado(s)</strong></header><div class="permission-toolbar"><label><span>âŒ•</span><input type="search" data-permission-search aria-label="Buscar mÃ³dulo" placeholder="Buscar mÃ³dulo ou funcionalidade" /></label><button type="button" class="secondary" data-action="select-all-permissions">Selecionar todos</button><button type="button" class="text-button" data-action="clear-permissions">Limpar seleÃ§Ã£o</button></div>${preservedLegacy}${legacyPermissions.length ? `<div class="legacy-permission-note"><i>i</i><span><strong>${legacyPermissions.length} acesso(s) de compatibilidade preservado(s)</strong><small>Eles nÃ£o aparecem no catÃ¡logo atual, mas nÃ£o serÃ£o removidos ao salvar.</small></span></div>` : ''}<div class="permission-groups">${permissionGroups || '<div class="empty">O catÃ¡logo de mÃ³dulos nÃ£o foi carregado.</div>'}</div><div class="permission-empty" data-permission-empty hidden>Nenhum mÃ³dulo encontrado para esta busca.</div></section></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">${editing ? 'Salvar alteraÃ§Ãµes' : 'Criar plano'}</button></footer></form></div>`;
-  }
-
-  function catalogItemModal() {
-    const item = state.modal?.id ? state.menu.find((entry) => String(entry.id) === String(state.modal.id)) : null;
-    const store = state.tenants.flatMap((tenant) => tenant.stores || []).find((entry) => String(entry.storeId || entry.id) === String(state.selectedStore));
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card large-modal" data-form="catalog-item"><header><div><p class="eyebrow">CARDÃPIO Â· ${escape(store?.name || 'OPERAÃ‡ÃƒO')}</p><h2 id="modal-title">${item ? `Editar ${escape(item.name)}` : 'Adicionar item ao cardÃ¡pio'}</h2><p>A alteraÃ§Ã£o serÃ¡ publicada na operaÃ§Ã£o selecionada.</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">Ã—</button></header><div class="modal-body form-grid"><input type="hidden" name="id" value="${item?.id || ''}"/><label>Nome do item<input name="name" required maxlength="180" value="${escape(item?.name || '')}" placeholder="Ex.: Risoto de cogumelos" /></label><label>Categoria<input name="category" list="catalog-categories" required maxlength="120" value="${escape(item?.categories?.name || 'Geral')}" placeholder="Pratos principais" /><datalist id="catalog-categories">${state.menuCategories.map((category) => `<option value="${escape(category.name)}"></option>`).join('')}</datalist></label><label>PreÃ§o<input name="price" type="number" step="0.01" min="0" required value="${item?.price ?? ''}" placeholder="39,90" /></label><label>Tempo de preparo (min)<input name="prepTime" type="number" min="0" max="1440" step="1" required value="${item?.prep_time_in_minutes ?? 15}" /></label><label>CÃ³digo externo<input name="externalCode" maxlength="120" value="${escape(item?.external_code || '')}" placeholder="SKU-001" /></label><label class="wide">DescriÃ§Ã£o<textarea name="description" maxlength="1000" placeholder="DescriÃ§Ã£o exibida no cardÃ¡pio">${escape(item?.description || '')}</textarea></label><label class="confirmation-check wide"><input type="checkbox" name="available" ${item?.is_available !== false ? 'checked' : ''}/><span><strong>DisponÃ­vel para venda</strong><small>Desmarque para criar ou manter o item pausado.</small></span></label></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">${item ? 'Salvar item' : 'Adicionar ao cardÃ¡pio'}</button></footer></form></div>`;
-  }
-
-  function onboardingSuccessModal() {
-    const result = state.modal?.data || {};
-    const auth = result.auth || {};
-    const tenant = result.tenant || {};
-    const plan = planById(tenant.planId);
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><section class="modal-card onboarding-success"><header><div><p class="eyebrow">ATIVAÃ‡ÃƒO CONCLUÃDA</p><h2 id="modal-title">Cliente pronto para entrar</h2><p>${auth.userCreated ? 'A conta e a estrutura ChefOS foram criadas.' : 'A conta existente foi reutilizada e a estrutura foi validada.'}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">Ã—</button></header><div class="modal-body"><div class="success-mark">âœ“</div><div class="credential-list"><div><span><small>E-MAIL DE ACESSO</small><strong>${escape(auth.email || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="email">Copiar</button></div>${auth.userCreated ? `<div><span><small>SENHA INICIAL</small><strong>${escape(state.modal.password || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="password">Copiar</button></div>` : '<div class="credential-note"><i>i</i><span><strong>Senha preservada</strong><small>O e-mail jÃ¡ existia; a senha informada nÃ£o foi aplicada.</small></span></div>'}<div><span><small>OPERAÃ‡ÃƒO</small><strong>${escape(tenant.storeName || '')}</strong></span></div><div><span><small>PLANO INICIAL</small><strong>${escape(plan?.name || 'Plano configurado')}</strong></span></div><div><span><small>CHAVE DE INTEGRAÃ‡ÃƒO</small><strong class="technical-value">${escape(tenant.apiKey || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="apiKey">Copiar</button></div></div><div class="security-reminder"><strong>Entregue as credenciais por um canal seguro</strong><p>A senha inicial sÃ³ permanece nesta tela enquanto o modal estiver aberto.</p></div></div><footer><button class="secondary" data-action="close-modal">Fechar</button><button class="primary" data-action="view-provisioned-customer" data-id="${tenant.accountId || ''}">Abrir visÃ£o do cliente</button></footer></section></div>`;
-  }
-
-  function adminAccessModal() {
-    const admin = (state.admins || []).find((item) => item.email === state.modal?.email);
-    if (!admin) return '';
-    const roles = state.adminRoles.length ? state.adminRoles : [{ key: admin.role, label: roleLabel(admin.role) }];
-    return `<div class='modal-shell' role='dialog' aria-modal='true' aria-labelledby='admin-access-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><form class='modal-card admin-access-modal' data-form='admin-access'><header><div><p class='eyebrow'>GESTÃƒO DE IDENTIDADE</p><h2 id='admin-access-title'>Acesso de ${escape(admin.display_name || admin.email)}</h2><p>${escape(admin.email)}</p></div><button type='button' class='icon-button' data-action='close-modal' aria-label='Fechar'>Ã—</button></header><div class='modal-body'><input type='hidden' name='email' value='${escape(admin.email)}' /><label>Nome de exibiÃ§Ã£o<input name='displayName' maxlength='160' value='${escape(admin.display_name || '')}' /></label><label>FunÃ§Ã£o<select name='role' required>${roles.map((role) => `<option value='${escape(role.key)}' ${admin.role === role.key ? 'selected' : ''}>${escape(role.label)}</option>`).join('')}</select></label><label>Status<select name='status' required><option value='active' ${admin.status === 'active' ? 'selected' : ''}>Ativo</option><option value='invited' ${admin.status === 'invited' ? 'selected' : ''}>Convite pendente</option><option value='suspended' ${admin.status === 'suspended' ? 'selected' : ''}>Suspenso</option><option value='revoked' ${admin.status === 'revoked' ? 'selected' : ''}>Revogado</option></select></label><label class='confirmation-check'><input type='checkbox' name='mfaRequired' ${admin.mfa_required ? 'checked' : ''} /><span><strong>Exigir segundo fator</strong><small>AÃ§Ãµes mutÃ¡veis podem exigir uma sessÃ£o AAL2.</small></span></label><label>Motivo da alteraÃ§Ã£o<textarea name='reason' required minlength='5' maxlength='500' placeholder='Explique por que o acesso estÃ¡ sendo alterado'></textarea></label><div class='modal-alert'><strong>AlteraÃ§Ã£o auditada</strong><p>MudanÃ§as de funÃ§Ã£o ou status preservam o histÃ³rico e nunca apagam a identidade.</p></div></div><footer><button type='button' class='secondary' data-action='close-modal'>Cancelar</button><button class='primary' type='submit'>Salvar acesso</button></footer></form></div>`;
-  }
-
-  function auditEventModal() {
-    const event = state.logs?.data?.find((item) => String(item.id) === String(state.modal?.id));
-    if (!event) return '';
-    return `<div class='modal-shell drawer-shell' role='dialog' aria-modal='true' aria-labelledby='audit-event-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><aside class='detail-drawer audit-drawer'><header><div><p class='eyebrow'>EVENTO DE AUDITORIA</p><h2 id='audit-event-title'>${escape(event.actionLabel || event.action)}</h2></div><button class='icon-button' data-action='close-modal' aria-label='Fechar'>Ã—</button></header><div class='drawer-signals'><span class='category-pill'>${escape(event.categoryLabel || event.category)}</span><span class='outcome outcome-${escape(event.outcome)}'>${escape(auditOutcomeLabel(event.outcome))}</span><span class='severity severity-${escape(event.severity)}'>${escape(event.severity)}</span></div><div class='detail-grid audit-detail-grid'><span><small>ATOR</small><strong>${escape(event.actor_email || 'NÃ£o identificado')}</strong></span><span><small>DATA E HORA</small><strong>${date(event.created_at)}</strong></span><span><small>RECURSO</small><strong>${escape(event.target_type || 'â€”')}</strong></span><span><small>IDENTIFICADOR</small><strong>${escape(event.target_id || 'â€”')}</strong></span><span><small>REQUISIÃ‡ÃƒO</small><strong>${escape(event.request_id || 'â€”')}</strong></span><span><small>RESULTADO</small><strong>${escape(auditOutcomeLabel(event.outcome))}</strong></span></div>${event.reason ? `<section class='audit-reason'><small>MOTIVO INFORMADO</small><p>${escape(event.reason)}</p></section>` : ''}<section class='audit-diff'><div><small>ANTES</small>${event.before_state ? `<pre>${escape(prettyJson(event.before_state))}</pre>` : `<p class='empty'>Sem estado anterior.</p>`}</div><div><small>DEPOIS</small>${event.after_state ? `<pre>${escape(prettyJson(event.after_state))}</pre>` : `<p class='empty'>Sem estado posterior.</p>`}</div></section><details class='audit-metadata'><summary>Metadados tÃ©cnicos</summary><pre>${escape(prettyJson(event.metadata || {}))}</pre></details></aside></div>`;
-  }
-
-  function modalView() {
-    if (!state.modal) return '';
-    if (state.modal.type === 'subscription') return subscriptionModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
-    if (state.modal.type === 'tenant') return tenantModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
-    if (state.modal.type === 'plan') return planModal();
-    if (state.modal.type === 'catalog-item') return catalogItemModal();
-    if (state.modal.type === 'onboarding-success') return onboardingSuccessModal();
-    if (state.modal.type === 'admin-access') return adminAccessModal();
-    if (state.modal.type === 'audit-event') return auditEventModal();
-    return '';
-  }
-
-  function shell() {
-    return `<div class="app-shell">${sidebar()}<div class="workspace">${topbar()}<main class="content">${state.notice ? `<div class="notice ${state.notice.type}" role="status"><span>${state.notice.type === 'error' ? '!' : 'âœ“'}</span>${escape(state.notice.text)}<button data-action="dismiss-notice" aria-label="Fechar">Ã—</button></div>` : ''}${state.loading ? '<div class="loading"><i></i>Atualizando operaÃ§Ã£o...</div>' : ''}${activePage()}</main></div>${state.sidebarOpen ? '<button class="sidebar-backdrop" data-action="toggle-sidebar" aria-label="Fechar menu"></button>' : ''}${modalView()}</div>`;
-  }
-
-  function render(focusKey = '') {
-    if (!configured()) { app.innerHTML = missingConfigView(); return; }
-    app.innerHTML = state.inviteMode ? inviteView() : state.mfaMode ? mfaView() : state.user ? shell() : loginView();
-    if (focusKey) {
-      const input = document.querySelector(`[data-search="${focusKey}"]`);
-      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
-    }
-    document.body.classList.toggle('modal-open', Boolean(state.modal));
-  }
-
-  async function safe(action) {
-    try { await action(); } catch (error) { state.loading = false; showNotice(error.message || 'Ocorreu um erro.', 'error'); }
-  }
-
-  function openSection(section) {
-    state.section = section;
-    state.sidebarOpen = false;
-    state.globalQuery = '';
-    state.loading = true;
-    render();
-    return loadSection(section).finally(() => { state.loading = false; render(); });
-  }
-
-  function downloadCsv(kind) {
-    const sourceTenants = kind === 'subscriptions'
-      ? state.tenants.filter((tenant) => {
-        const subscription = tenant.subscriptions?.[0] || {};
-        const query = state.filters.subscription;
-        return (!query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query))
-          && (state.filters.subscriptionStatus === 'all' || subscription.status === state.filters.subscriptionStatus);
-      })
-      : state.tenants.filter((tenant) => !state.filters.customer || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, state.filters.customer));
-    const rows = kind === 'subscriptions'
-      ? [['Cliente', 'Email', 'Loja', 'Plano', 'Status', 'Valor mensal', 'RenovaÃ§Ã£o'], ...sourceTenants.map((tenant) => { const subscription = tenant.subscriptions?.[0] || {}; const plan = planById(subscription.plan_id); return [tenant.full_name, tenant.email, tenant.stores?.[0]?.name || '', plan?.name || '', subscription.status || '', plan?.price || 0, subscription.current_period_end || '']; })]
-      : [['Cliente', 'Email', 'Lojas', 'Status', 'Criado em', 'Ãšltimo acesso'], ...sourceTenants.map((tenant) => [tenant.full_name, tenant.email, tenant.stores?.map((store) => store.name).join(' | ') || '', tenant.subscriptions?.[0]?.status || '', tenant.created_at || '', tenant.last_sign_in_at || ''])];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(';')).join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `chefos-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    showNotice('Arquivo CSV preparado com sucesso.');
-  }
-
-  async function downloadAuditCsv() {
-    const filters = state.filters;
-    const query = new URLSearchParams({
-      export: '1', q: filters.auditQuery || '', category: filters.auditCategory || 'all',
-      outcome: filters.auditOutcome || 'all', actor: filters.auditActor || '',
-      from: filters.auditFrom || '', to: filters.auditTo || ''
-    });
-    const result = await api(`/api/admin/logs?${query}`);
-    const rows = [['Data', 'AÃ§Ã£o', 'Ator', 'Categoria', 'Resultado', 'Risco', 'Recurso', 'ID do recurso', 'Motivo', 'Request ID'], ...(result.data || []).map((event) => [
-      event.created_at, event.actionLabel || event.action, event.actor_email, event.categoryLabel || event.category,
-      auditOutcomeLabel(event.outcome), event.severity, event.target_type || '', event.target_id || '', event.reason || '', event.request_id || ''
-    ])];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(';')).join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `chefos-auditoria-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    showNotice(`${Math.max(0, rows.length - 1)} evento(s) exportado(s).`);
-  }
-
-  document.addEventListener('submit', (event) => safe(async () => {
-    const form = event.target.closest('form');
-    if (!form) return;
-    event.preventDefault();
-    const values = Object.fromEntries(new FormData(form));
-    if (form.dataset.form === 'login') {
-      state.loading = true; render();
-      const ready = await signIn(values.email, values.password);
-      if (ready) await loadCore();
-      return;
-    }
-    if (form.dataset.form === 'invite-password') {
-      state.loading = true; render();
-      await finishInvitation(values.password, values.confirmation);
-      return;
-    }
-    if (form.dataset.form === 'mfa') {
-      state.loading = true; render();
-      await verifyMfa(values.code);
-      return;
-    }
-    if (form.dataset.form === 'subscription') {
-      const currentPeriodEnd = values.currentPeriodEnd ? new Date(`${values.currentPeriodEnd}T23:59:59`).toISOString() : undefined;
-      const result = await api('/api/admin/subscriptions', { method: 'POST', body: { accountId: values.accountId, status: values.status, planId: values.planId, currentPeriodEnd, reason: values.reason } });
-      state.modal = null;
-      await loadCore();
-      showNotice(result.warning || 'Assinatura atualizada e registrada na auditoria.');
-      return;
-    }
-    if (form.dataset.form === 'plan') {
-      const editing = Boolean(values.id);
-      const permissions = [...new Set(new FormData(form).getAll('permissions').map((key) => String(key)).filter(Boolean))];
-      await api('/api/admin/plans', { method: editing ? 'PUT' : 'POST', body: { id: values.id || undefined, plan: { name: values.name, slug: values.slug, description: values.description, price: Number(values.price), trial_period_days: Number(values.trial), max_stores: Number(values.stores), recurring: values.recurring === 'on', isMostPopular: values.popular === 'on', preapproval_plan_id: values.preapprovalPlanId, mp_reason: values.mpReason }, permissions } });
-      const plans = await api('/api/admin/plans');
-      state.plans = plans.data || [];
-      state.permissionCatalog = plans.permissionCatalog || state.permissionCatalog;
-      state.modal = null;
-      showNotice(editing ? 'Plano atualizado com sucesso.' : 'Plano criado com sucesso.');
-      return;
-    }
-    if (form.dataset.form === 'catalog-item') {
-      const item = { name: values.name, category: values.category, price: Number(values.price), prep_time_in_minutes: Number(values.prepTime), description: values.description, external_code: values.externalCode, is_available: values.available === 'on' };
-      await api('/api/admin/tenant-menu', { method: values.id ? 'PUT' : 'POST', body: { storeId: state.selectedStore, id: values.id || undefined, item } });
-      state.modal = null;
-      await loadSection('catalog');
-      showNotice(values.id ? 'Item atualizado no cardÃ¡pio.' : 'Item adicionado ao cardÃ¡pio.');
-      return;
-    }
-    if (form.dataset.form === 'reply') {
-      await api('/api/admin/messages', { method: 'POST', body: { ticket_id: form.dataset.ticket, text: values.text, status_update: values.status } });
-      const tickets = await api('/api/admin/tickets');
-      state.tickets = tickets.data || [];
-      state.ticketSummary = tickets.summary || null;
-      state.ticketMeta = tickets.meta || null;
-      showNotice('Resposta enviada ao cliente.');
-      return;
-    }
-    if (form.dataset.form === 'provision') {
-      state.loading = true; render();
-      const result = await api('/api/admin/provision-tenant', { method: 'POST', body: values });
-      await loadCore();
-      state.modal = { type: 'onboarding-success', data: result, password: values.initialPassword };
-      render();
-      return;
-    }
-    if (form.dataset.form === 'admin') {
-      const result = await api('/api/admin/administrators', { method: 'POST', body: { ...values, mfaRequired: values.mfaRequired === 'on' } });
-      await loadSection('administrators', true);
-      form.reset();
-      showNotice(result.message || 'Convite administrativo enviado.');
-      return;
-    }
-    if (form.dataset.form === 'admin-access') {
-      await api('/api/admin/administrators', { method: 'PUT', body: { ...values, mfaRequired: values.mfaRequired === 'on' } });
-      state.modal = null;
-      await loadSection('administrators', true);
-      showNotice('Acesso atualizado e registrado na auditoria.');
-      return;
-    }
-    if (form.dataset.form === 'audit-filter') {
-      Object.assign(state.filters, {
-        auditQuery: values.q || '', auditCategory: values.category || 'all', auditOutcome: values.outcome || 'all',
-        auditActor: values.actor || '', auditFrom: values.from || '', auditTo: values.to || '', auditPage: 1
-      });
-      state.logs = null;
-      state.loading = true;
-      render();
-      await loadSection('logs', true);
-      state.loading = false;
-      render();
-      return;
-    }
-  }));
-
-  document.addEventListener('click', (event) => safe(async () => {
-    const target = event.target.closest('[data-action]');
-    if (!target) return;
-    const action = target.dataset.action;
-    if (action === 'logout') return signOut();
-    if (action === 'copy-mfa-secret') {
-      await navigator.clipboard.writeText(state.mfaMode?.secret || '');
-      showNotice('Chave do autenticador copiada.');
-      return;
-    }
-    if (action === 'section' || action === 'command-section') return openSection(target.dataset.section);
-    if (action === 'filtered-section') { state.filters.subscriptionStatus = target.dataset.filter; return openSection(target.dataset.section); }
-    if (action === 'toggle-sidebar') { state.sidebarOpen = !state.sidebarOpen; render(); return; }
-    if (action === 'refresh') return loadCore();
-    if (action === 'dismiss-notice') { state.notice = null; render(); return; }
-    if (action === 'close-modal') { state.modal = null; render(); return; }
-    if (action === 'manage-admin') { state.modal = { type: 'admin-access', email: target.dataset.email }; render(); return; }
-    if (action === 'view-audit') { state.modal = { type: 'audit-event', id: target.dataset.id }; render(); return; }
-    if (action === 'open-plan') { state.modal = { type: 'plan' }; render(); return; }
-    if (action === 'edit-plan') { state.modal = { type: 'plan', id: target.dataset.id }; render(); return; }
-    if (action === 'duplicate-plan') { state.modal = { type: 'plan', id: target.dataset.id, duplicate: true }; render(); return; }
-    if (action === 'select-all-permissions' || action === 'clear-permissions') {
-      const form = target.closest('form');
-      form?.querySelectorAll('input[type="checkbox"][name="permissions"]').forEach((checkbox) => { checkbox.checked = action === 'select-all-permissions'; });
-      updatePermissionSummary(form);
-      return;
-    }
-    if (action === 'toggle-permission-group') {
-      const form = target.closest('form');
-      const checkboxes = [...target.closest('[data-permission-group]')?.querySelectorAll('input[name="permissions"]') || []];
-      const shouldSelect = checkboxes.some((checkbox) => !checkbox.checked);
-      checkboxes.forEach((checkbox) => { checkbox.checked = shouldSelect; });
-      updatePermissionSummary(form);
-      return;
-    }
-    if (action === 'open-catalog-item') { state.modal = { type: 'catalog-item' }; render(); return; }
-    if (action === 'edit-catalog-item') { state.modal = { type: 'catalog-item', id: target.dataset.id }; render(); return; }
-    if (action === 'generate-password') {
-      const input = target.closest('form')?.querySelector('[name="initialPassword"]');
-      if (input) { input.value = randomPassword(); input.focus(); input.select(); }
-      return;
-    }
-    if (action === 'copy-onboarding') {
-      const values = { email: state.modal?.data?.auth?.email, password: state.modal?.password, apiKey: state.modal?.data?.tenant?.apiKey };
-      await navigator.clipboard.writeText(String(values[target.dataset.copy] || ''));
-      showNotice('InformaÃ§Ã£o copiada com seguranÃ§a.');
-      return;
-    }
-    if (action === 'view-provisioned-customer') { state.modal = { type: 'tenant', id: target.dataset.id }; render(); return; }
-    if (action === 'open-provision') return openSection('provision');
-    if (action === 'open-tenant') { state.globalQuery = ''; state.modal = { type: 'tenant', id: target.dataset.id }; render(); return; }
-    if (action === 'edit-subscription') { state.modal = { type: 'subscription', id: target.dataset.id }; render(); return; }
-    if (action === 'tenant-catalog') {
-      state.modal = null;
-      state.selectedTenant = target.dataset.id;
-      const tenant = state.tenants.find((item) => String(item.accountId || item.id) === String(target.dataset.id));
-      state.selectedStore = tenant?.stores?.[0]?.storeId || tenant?.stores?.[0]?.id || '';
-      return openSection('catalog');
-    }
-    if (action === 'export') { downloadCsv(target.dataset.kind); return; }
-    if (action === 'ticket-filter') { state.filters.ticketStatus = target.dataset.value; render(); return; }
-    if (action === 'select-ticket') { state.selectedTicketId = target.dataset.id; render(); return; }
-    if (action === 'open-ticket') { state.selectedTicketId = target.dataset.id; return openSection('support'); }
-    if (action === 'reload-tickets') { state.loading = true; render(); await loadSection('support', true); state.loading = false; render(); return; }
-    if (action === 'resolve-ticket') {
-      await api('/api/admin/tickets', { method: 'PUT', body: { id: target.dataset.id, updates: { status: 'resolved' } } });
-      const tickets = await api('/api/admin/tickets');
-      state.tickets = tickets.data || [];
-      state.ticketSummary = tickets.summary || null;
-      state.ticketMeta = tickets.meta || null;
-      showNotice('Chamado marcado como resolvido.');
-      return;
-    }
-    if (action === 'reload-health') {
-      state.loading = true; render();
-      state.health = await api('/api/admin/health', { method: 'POST' });
-      state.loading = false;
-      showNotice('DiagnÃ³stico concluÃ­do e armazenado no histÃ³rico.');
-      return;
-    }
-    if (action === 'health-navigate') {
-      if (target.dataset.section === 'subscriptions' && target.dataset.filter) state.filters.subscriptionStatus = target.dataset.filter;
-      return openSection(target.dataset.section);
-    }
-    if (action === 'reload-logs') { state.logs = null; state.loading = true; render(); await loadSection('logs', true); state.loading = false; render(); return; }
-    if (action === 'reload-beta') { state.betaApplications = null; state.loading = true; render(); await loadSection('beta', true); state.loading = false; render(); return; }
-    if (action === 'convert-beta') {
-      await api('/api/admin/beta-applications', { method: 'POST', body: { id: target.dataset.id } });
-      await loadSection('beta', true); render(); showNotice('Participante criado e movido para onboarding.'); return;
-    }
-    if (action === 'export-audit') { await downloadAuditCsv(); return; }
-    if (action === 'audit-page') {
-      state.filters.auditPage = Number(target.dataset.page || 1);
-      state.logs = null; state.loading = true; render();
-      await loadSection('logs', true); state.loading = false; render(); return;
-    }
-    if (action === 'clear-audit-filters') {
-      Object.assign(state.filters, { auditQuery: '', auditCategory: 'all', auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1 });
-      state.logs = null; state.loading = true; render();
-      await loadSection('logs', true); state.loading = false; render(); return;
-    }
-    if (action === 'toggle-menu') {
-      await api('/api/admin/tenant-menu', { method: 'PUT', body: { storeId: state.selectedStore, id: target.dataset.id, item: { is_available: target.dataset.available !== 'true' } } });
-      await loadSection('catalog'); render(); showNotice('Disponibilidade atualizada.'); return;
-    }
-    if (action === 'delete-plan') {
-      if (!confirm('Excluir este plano? Assinaturas vinculadas podem impedir a exclusÃ£o.')) return;
-      await api('/api/admin/plans', { method: 'DELETE', body: { id: target.dataset.id } });
-      state.plans = (await api('/api/admin/plans')).data || []; showNotice('Plano excluÃ­do.'); return;
-    }
-    if (action === 'delete-admin') {
-      if (!confirm(`Remover ${target.dataset.email} do Control Center?`)) return;
-      await api('/api/admin/administrators', { method: 'DELETE', body: { email: target.dataset.email, reason: 'Acesso revogado pelo painel' } });
-      await loadSection('administrators', true); showNotice('Acesso revogado e histÃ³rico preservado.');
-    }
-  }));
-
-  document.addEventListener('input', (event) => {
-    const permissionSearch = event.target.closest('[data-permission-search]');
-    if (permissionSearch) { filterPermissionOptions(permissionSearch); return; }
-    const input = event.target.closest('[data-search]');
-    if (!input) return;
-    const key = input.dataset.search;
-    if (key === 'global') state.globalQuery = input.value;
-    else state.filters[key] = input.value;
-    render(key);
-  });
-
-  document.addEventListener('change', (event) => safe(async () => {
-    const betaStatus = event.target.closest('[data-action="beta-status"]');
-    if (betaStatus) {
-      await api('/api/admin/beta-applications', { method: 'PATCH', body: { id: betaStatus.dataset.id, status: betaStatus.value } });
-      await loadSection('beta', true); render(); showNotice('Etapa atualizada com auditoria.'); return;
-    }
-    const permission = event.target.closest('input[type="checkbox"][name="permissions"]');
-    if (permission) { updatePermissionSummary(permission.closest('form')); return; }
-    const filter = event.target.closest('[data-filter]');
-    if (filter) { state.filters[filter.dataset.filter] = filter.value; render(); return; }
-    const customerSelect = event.target.closest('[data-action="select-tenant"]');
-    const storeSelect = event.target.closest('[data-action="select-store"]');
-    if (!customerSelect && !storeSelect) return;
-    if (customerSelect) {
-      state.selectedTenant = customerSelect.value;
-      const tenant = state.tenants.find((item) => String(item.accountId || item.id) === String(state.selectedTenant));
-      state.selectedStore = tenant?.stores?.[0]?.storeId || tenant?.stores?.[0]?.id || '';
-    }
-    if (storeSelect) state.selectedStore = storeSelect.value;
-    state.filters.catalogCategory = 'all';
-    state.loading = true; render();
-    await loadSection('catalog');
-    state.loading = false; render();
-  }));
-
-  document.addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-      event.preventDefault();
-      document.querySelector('[data-search="global"]')?.focus();
-    }
-    if (event.key === 'Escape') {
-      state.modal = null;
-      state.sidebarOpen = false;
-      state.globalQuery = '';
-      render();
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-      const form = event.target.closest('form[data-form="reply"]');
-      if (form) {
-        event.preventDefault();
-        form.requestSubmit();
-      }
-    }
-  });
-
-  async function boot() {
-    render();
-    if (state.inviteMode) return;
-    if (!configured() || !state.token) return;
-    try {
-      state.user = (await api('/api/admin/session')).data;
-      if (await prepareMfa()) return;
-      await loadCore();
-    } catch {
-      await signOut();
-      showNotice('Sua sessÃ£o expirou. Entre novamente.', 'error');
-    }
-  }
-
-  boot();
-})();
+    if (!response.ok) throw new Error(body.msg || body.message || body.error_description || 'NÃ£o foi possÃ­vel validarãMôÖÚ$z{-®éÜj×€€€€…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½İ½É¬µ‰½…Éœ°ìµ•Ñ¡½è€AQ œ°‰½‘äèì(€€€€€€€Í½ÕÉ”è…É¹Í½ÕÉ”°¥è…É¹Í½ÕÉ•%°ÍÑ…ÑÕÌèÙ…±Õ•Ì¹ÍÑ…ÑÕÌ°(€€€€€€€…ÍÍ¥¹•‘Q¼èÙ…±Õ•Ì¹…ÍÍ¥¹•‘Q¼ñğ¹Õ±°°(€€€€€€€‘Õ•ĞèÙ…±Õ•Ì¹‘Õ•Ğ€ü¹•Ü…Ñ”¡Ù…±Õ•Ì¹‘Õ•Ğ¤¹Ñ½%M=MÑÉ¥¹œ ¤€è¹Õ±°°(€€€€€€€Á½Í¥Ñ¥½¸è…Ñ”¹¹½Ü ¤°¹½Ñ”èÙ…±Õ•Ì¹¹½Ñ”ñğ¹Õ±°°(€€€€€€€•áÁ•Ñ•‘UÁ‘…Ñ•‘Ğè…É¹Í½ÕÉ•UÁ‘…Ñ•‘Ğ(€€€€€ôô¤ì(€€€€€ÍÑ…Ñ”¹µ½‘…°€ô¹Õ±°ì(€€€€€¥˜€¡…É¹Í½ÕÉ”€ôôô€ÍÕÁÁ½ÉĞœ¤ÍÑ…Ñ”¹Ñ¥­•ÑÌ€ô¹Õ±°ì(€€€€€¥˜€¡…É¹Í½ÕÉ”€ôôô€‰•Ñ„œ¤ÍÑ…Ñ”¹‰•Ñ…ÁÁ±¥…Ñ¥½¹Ì€ô¹Õ±°ì(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ İ½É­‰½…Éœ°ÑÉÕ”¤ì(€€€€€É•¹‘•È ¤ì(€€€€€Í¡½İ9½Ñ¥” …É…ÑÕ…±¥é…‘¼”É•¥ÍÑÉ…‘¼¹„…Õ‘¥Ñ½É¥„¸œ¤ì(€€€€€É•ÑÕÉ¸ì(€€€ô(€€€¥˜€¡™½É´¹‘…Ñ…Í•Ğ¹™½É´€ôôô€‰•Ñ„µ…ÁÁ±¥…Ñ¥½¸œ¤ì(€€€€€…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½‰•Ñ„µ…ÁÁ±¥…Ñ¥½¹Ìœ°ìµ•Ñ¡½è€AQ œ°‰½‘äèì¥èÙ…±Õ•Ì¹¥°ÍÑ…ÑÕÌèÙ…±Õ•Ì¹ÍÑ…ÑÕÌ°½¡½ÉĞèÙ…±Õ•Ì¹½¡½ÉĞ°¹½Ñ”èÙ…±Õ•Ì¹¹½Ñ”ôô¤ì(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ ‰•Ñ„œ°ÑÉÕ”¤ì(€€€€€É•¹‘•È ¤ì(€€€€€Í¡½İ9½Ñ¥”¡Ù…±Õ•Ì¹ÍÑ…ÑÕÌ€ôôô€…Ñ¥Ù”œ€ü€A…ÉÑ¥¥Á…¹Ñ”…Ñ¥Ù…‘¼ì¼¥±¼‘”€äÀ‘¥…Ì½µ—½Ô¸œ€è€½µÁ…¹¡…µ•¹Ñ¼É•¥ÍÑÉ…‘¼¹¼¡¥ÍÓÍÉ¥¼¸œ¤ì(€€€€€É•ÑÕÉ¸ì(€€€ô(€€€¥˜€¡™½É´¹‘…Ñ…Í•Ğ¹™½É´€ôôô€…Õ‘¥Ğµ™¥±Ñ•Èœ¤ì4(€€€€€=‰©•Ğ¹…ÍÍ¥¸¡ÍÑ…Ñ”¹™¥±Ñ•ÉÌ°ì4(€€€€€€€…Õ‘¥ÑEÕ•ÉäèÙ…±Õ•Ì¹Äñğ€œœ°…Õ‘¥Ñ…Ñ•½ÉäèÙ…±Õ•Ì¹…Ñ•½Éäñğ€…±°œ°…Õ‘¥Ñ=ÕÑ½µ”èÙ…±Õ•Ì¹½ÕÑ½µ”ñğ€…±°œ°4(€€€€€€€…Õ‘¥ÑÑ½ÈèÙ…±Õ•Ì¹…Ñ½Èñğ€œœ°…Õ‘¥ÑÉ½´èÙ…±Õ•Ì¹™É½´ñğ€œœ°…Õ‘¥ÑQ¼èÙ…±Õ•Ì¹Ñ¼ñğ€œœ°…Õ‘¥ÑA…”è€Ä4(€€€€€ô¤ì4(€€€€€ÍÑ…Ñ”¹±½Ì€ô¹Õ±°ì4(€€€€€ÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ì4(€€€€€É•¹‘•È ¤ì4(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ ±½Ìœ°ÑÉÕ”¤ì4(€€€€€ÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ì4(€€€€€É•¹‘•È ¤ì4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€ô¤¤ì4(4(€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ±¥¬œ°€¡•Ù•¹Ğ¤€ôøÍ…™”¡…Íå¹Œ€ ¤€ôøì4(€€€½¹ÍĞÑ…É•Ğ€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µ…Ñ¥½¹tœ¤ì4(€€€¥˜€ …Ñ…É•Ğ¤É•ÑÕÉ¸ì4(€€€½¹ÍĞ…Ñ¥½¸€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹…Ñ¥½¸ì4(€€€¥˜€¡…Ñ¥½¸€ôôô€±½½ÕĞœ¤É•ÑÕÉ¸Í¥¹=ÕĞ ¤ì4(€€€¥˜€¡…Ñ¥½¸€ôôô€½Áäµµ™„µÍ•É•Ğœ¤ì4(€€€€€…İ…¥Ğ¹…Ù¥…Ñ½È¹±¥Á‰½…É¹İÉ¥Ñ•Q•áĞ¡ÍÑ…Ñ”¹µ™…5½‘”ü¹Í•É•Ğñğ€œœ¤ì4(€€€€€Í¡½İ9½Ñ¥” ¡…Ù”‘¼…ÕÑ•¹Ñ¥…‘½È½Á¥…‘„¸œ¤ì4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Í•Ñ¥½¸œñğ…Ñ¥½¸€ôôô€½µµ…¹µÍ•Ñ¥½¸œ¤É•ÑÕÉ¸½Á•¹M•Ñ¥½¸¡Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹Í•Ñ¥½¸¤ì4(€€€¥˜€¡…Ñ¥½¸€ôôô€™¥±Ñ•É•µÍ•Ñ¥½¸œ¤ìÍÑ…Ñ”¹™¥±Ñ•ÉÌ¹ÍÕ‰ÍÉ¥ÁÑ¥½¹MÑ…ÑÕÌ€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹™¥±Ñ•ÈìÉ•ÑÕÉ¸½Á•¹M•Ñ¥½¸¡Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹Í•Ñ¥½¸¤ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Ñ½±”µÍ¥‘•‰…Èœ¤ìÍÑ…Ñ”¹Í¥‘•‰…É=Á•¸€ô€…ÍÑ…Ñ”¹Í¥‘•‰…É=Á•¸ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€É•™É•Í œ¤É•ÑÕÉ¸±½…‘½É” ¤ì4(€€€¥˜€¡…Ñ¥½¸€ôôô€‘¥Íµ¥ÍÌµ¹½Ñ¥”œ¤ìÍÑ…Ñ”¹¹½Ñ¥”€ô¹Õ±°ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€±½Í”µµ½‘…°œ¤ìÍÑ…Ñ”¹µ½‘…°€ô¹Õ±°ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€µ…¹…”µ…‘µ¥¸œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€…‘µ¥¸µ…•ÍÌœ°•µ…¥°èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹•µ…¥°ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô(€€€¥˜€¡…Ñ¥½¸€ôôô€Ù¥•Üµ…Õ‘¥Ğœ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€…Õ‘¥Ğµ•Ù•¹Ğœ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô(€€€¥˜€¡…Ñ¥½¸€ôôô€İ½É¬µÙ¥•Üœ¤ìÍÑ…Ñ”¹İ½É­Y¥•Ü€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹Ù¥•Üñğ€É…‘…ÈœìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô(€€€¥˜€¡…Ñ¥½¸€ôôô€½É…¹¥é”µİ½É¬œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€İ½É¬µ¥Ñ•´œ°­•äèÑ…É•Ğ¹‘…Ñ…Í•Ğ¹­•äôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô(€€€¥˜€¡…Ñ¥½¸€ôôô€½Á•¸µİ½É¬µ¥Ñ•´œ¤ì(€€€€€½¹ÍĞ…É€ô€¡ÍÑ…Ñ”¹İ½É­…É‘Ìñğmt¤¹™¥¹ ¡¥Ñ•´¤€ôø¥Ñ•´¹­•ä€ôôôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹­•ä¤ì(€€€€€¥˜€ ……É¤É•ÑÕÉ¸ì(€€€€€¥˜€¡…É¹Í½ÕÉ”€ôôô€ÍÕÁÁ½ÉĞœ¤ì(€€€€€€€ÍÑ…Ñ”¹Í•±•Ñ•‘Q¥­•Ñ%€ô…É¹Í½ÕÉ•%ì(€€€€€€€É•ÑÕÉ¸½Á•¹M•Ñ¥½¸ ÍÕÁÁ½ÉĞœ¤ì(€€€€€ô(€€€€€¥˜€ …ÍÑ…Ñ”¹‰•Ñ…ÁÁ±¥…Ñ¥½¹Ì¤…İ…¥Ğ±½…‘M•Ñ¥½¸ ‰•Ñ„œ°ÑÉÕ”¤ì(€€€€€ÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€‰•Ñ„µ…ÁÁ±¥…Ñ¥½¸œ°¥è…É¹Í½ÕÉ•%ôì(€€€€€É•¹‘•È ¤ì(€€€€€É•ÑÕÉ¸ì(€€€ô(€€€¥˜€¡…Ñ¥½¸€ôôô€½Á•¸µ‰•Ñ„œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€‰•Ñ„µ…ÁÁ±¥…Ñ¥½¸œ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô(€€€¥˜€¡…Ñ¥½¸€ôôô€½Á•¸µÁ±…¸œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€Á±…¸œôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€•‘¥ĞµÁ±…¸œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€Á±…¸œ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€‘ÕÁ±¥…Ñ”µÁ±…¸œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€Á±…¸œ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥°‘ÕÁ±¥…Ñ”èÑÉÕ”ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Í•±•Ğµ…±°µÁ•Éµ¥ÍÍ¥½¹Ìœñğ…Ñ¥½¸€ôôô€±•…ÈµÁ•Éµ¥ÍÍ¥½¹Ìœ¤ì4(€€€€€½¹ÍĞ™½É´€ôÑ…É•Ğ¹±½Í•ÍĞ ™½É´œ¤ì4(€€€€€™½É´ü¹ÅÕ•ÉåM•±•Ñ½É±° ¥¹ÁÕÑmÑåÁ”ô‰¡•­‰½à‰um¹…µ”ô‰Á•Éµ¥ÍÍ¥½¹Ì‰tœ¤¹™½É…  ¡¡•­‰½à¤€ôøì¡•­‰½à¹¡•­•€ô…Ñ¥½¸€ôôô€Í•±•Ğµ…±°µÁ•Éµ¥ÍÍ¥½¹Ìœìô¤ì4(€€€€€ÕÁ‘…Ñ•A•Éµ¥ÍÍ¥½¹MÕµµ…Éä¡™½É´¤ì4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Ñ½±”µÁ•Éµ¥ÍÍ¥½¸µÉ½ÕÀœ¤ì4(€€€€€½¹ÍĞ™½É´€ôÑ…É•Ğ¹±½Í•ÍĞ ™½É´œ¤ì4(€€€€€½¹ÍĞ¡•­‰½á•Ì€ôl¸¸¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µÁ•Éµ¥ÍÍ¥½¸µÉ½ÕÁtœ¤ü¹ÅÕ•ÉåM•±•Ñ½É±° ¥¹ÁÕÑm¹…µ”ô‰Á•Éµ¥ÍÍ¥½¹Ì‰tœ¤ñğmutì4(€€€€€½¹ÍĞÍ¡½Õ±‘M•±•Ğ€ô¡•­‰½á•Ì¹Í½µ” ¡¡•­‰½à¤€ôø€…¡•­‰½à¹¡•­•¤ì4(€€€€€¡•­‰½á•Ì¹™½É…  ¡¡•­‰½à¤€ôøì¡•­‰½à¹¡•­•€ôÍ¡½Õ±‘M•±•Ğìô¤ì4(€€€€€ÕÁ‘…Ñ•A•Éµ¥ÍÍ¥½¹MÕµµ…Éä¡™½É´¤ì4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€½Á•¸µ…Ñ…±½œµ¥Ñ•´œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€…Ñ…±½œµ¥Ñ•´œôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€•‘¥Ğµ…Ñ…±½œµ¥Ñ•´œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€…Ñ…±½œµ¥Ñ•´œ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€•¹•É…Ñ”µÁ…ÍÍİ½Éœ¤ì4(€€€€€½¹ÍĞ¥¹ÁÕĞ€ôÑ…É•Ğ¹±½Í•ÍĞ ™½É´œ¤ü¹ÅÕ•ÉåM•±•Ñ½È m¹…µ”ô‰¥¹¥Ñ¥…±A…ÍÍİ½É‰tœ¤ì4(€€€€€¥˜€¡¥¹ÁÕĞ¤ì¥¹ÁÕĞ¹Ù…±Õ”€ôÉ…¹‘½µA…ÍÍİ½É ¤ì¥¹ÁÕĞ¹™½ÕÌ ¤ì¥¹ÁÕĞ¹Í•±•Ğ ¤ìô4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€½Áäµ½¹‰½…É‘¥¹œœ¤ì4(€€€€€½¹ÍĞÙ…±Õ•Ì€ôì•µ…¥°èÍÑ…Ñ”¹µ½‘…°ü¹‘…Ñ„ü¹…ÕÑ ü¹•µ…¥°°Á…ÍÍİ½ÉèÍÑ…Ñ”¹µ½‘…°ü¹Á…ÍÍİ½É°…Á¥-•äèÍÑ…Ñ”¹µ½‘…°ü¹‘…Ñ„ü¹Ñ•¹…¹Ğü¹…Á¥-•äôì4(€€€€€…İ…¥Ğ¹…Ù¥…Ñ½È¹±¥Á‰½…É¹İÉ¥Ñ•Q•áĞ¡MÑÉ¥¹œ¡Ù…±Õ•ÍmÑ…É•Ğ¹‘…Ñ…Í•Ğ¹½Áåtñğ€œœ¤¤ì4(€€€€€Í¡½İ9½Ñ¥” %¹™½Éµ‡Ÿ¼½Á¥…‘„½´Í•ÕÉ…»„¸œ¤ì4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Ù¥•ÜµÁÉ½Ù¥Í¥½¹•µÕÍÑ½µ•Èœ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€Ñ•¹…¹Ğœ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€½Á•¸µÁÉ½Ù¥Í¥½¸œ¤É•ÑÕÉ¸½Á•¹M•Ñ¥½¸ ÁÉ½Ù¥Í¥½¸œ¤ì4(€€€¥˜€¡…Ñ¥½¸€ôôô€½Á•¸µÑ•¹…¹Ğœ¤ìÍÑ…Ñ”¹±½‰…±EÕ•Éä€ô€œœìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€Ñ•¹…¹Ğœ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€•‘¥ĞµÍÕ‰ÍÉ¥ÁÑ¥½¸œ¤ìÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€ÍÕ‰ÍÉ¥ÁÑ¥½¸œ°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Ñ•¹…¹Ğµ…Ñ…±½œœ¤ì4(€€€€€ÍÑ…Ñ”¹µ½‘…°€ô¹Õ±°ì4(€€€€€ÍÑ…Ñ”¹Í•±•Ñ•‘Q•¹…¹Ğ€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ì4(€€€€€½¹ÍĞÑ•¹…¹Ğ€ôÍÑ…Ñ”¹Ñ•¹…¹ÑÌ¹™¥¹ ¡¥Ñ•´¤€ôøMÑÉ¥¹œ¡¥Ñ•´¹…½Õ¹Ñ%ñğ¥Ñ•´¹¥¤€ôôôMÑÉ¥¹œ¡Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹¥¤¤ì4(€€€€€ÍÑ…Ñ”¹Í•±•Ñ•‘MÑ½É”€ôÑ•¹…¹Ğü¹ÍÑ½É•Ìü¹lÁtü¹ÍÑ½É•%ñğÑ•¹…¹Ğü¹ÍÑ½É•Ìü¹lÁtü¹¥ñğ€œœì4(€€€€€É•ÑÕÉ¸½Á•¹M•Ñ¥½¸ …Ñ…±½œœ¤ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€•áÁ½ÉĞœ¤ì‘½İ¹±½…‘ÍØ¡Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹­¥¹¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Ñ¥­•Ğµ™¥±Ñ•Èœ¤ìÍÑ…Ñ”¹™¥±Ñ•ÉÌ¹Ñ¥­•ÑMÑ…ÑÕÌ€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹Ù…±Õ”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Í•±•ĞµÑ¥­•Ğœ¤ìÍÑ…Ñ”¹Í•±•Ñ•‘Q¥­•Ñ%€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€½Á•¸µÑ¥­•Ğœ¤ìÍÑ…Ñ”¹Í•±•Ñ•‘Q¥­•Ñ%€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ìÉ•ÑÕÉ¸½Á•¹M•Ñ¥½¸ ÍÕÁÁ½ÉĞœ¤ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€É•±½…µÑ¥­•ÑÌœ¤ìÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì…İ…¥Ğ±½…‘M•Ñ¥½¸ ÍÕÁÁ½ÉĞœ°ÑÉÕ”¤ìÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô(€€€¥˜€¡…Ñ¥½¸€ôôô€É•±½…µİ½É­‰½…Éœ¤ìÍÑ…Ñ”¹İ½É­…É‘Ì€ô¹Õ±°ìÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì…İ…¥Ğ±½…‘M•Ñ¥½¸ İ½É­‰½…Éœ°ÑÉÕ”¤ìÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô(€€€¥˜€¡…Ñ¥½¸€ôôô€É•Í½±Ù”µÑ¥­•Ğœ¤ì4(€€€€€…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½Ñ¥­•ÑÌœ°ìµ•Ñ¡½è€AUPœ°‰½‘äèì¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥°ÕÁ‘…Ñ•ÌèìÍÑ…ÑÕÌè€É•Í½±Ù•œôôô¤ì4(€€€€€½¹ÍĞÑ¥­•ÑÌ€ô…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½Ñ¥­•ÑÌœ¤ì4(€€€€€ÍÑ…Ñ”¹Ñ¥­•ÑÌ€ôÑ¥­•ÑÌ¹‘…Ñ„ñğmtì4(€€€€€ÍÑ…Ñ”¹Ñ¥­•ÑMÕµµ…Éä€ôÑ¥­•ÑÌ¹ÍÕµµ…Éäñğ¹Õ±°ì4(€€€€€ÍÑ…Ñ”¹Ñ¥­•Ñ5•Ñ„€ôÑ¥­•ÑÌ¹µ•Ñ„ñğ¹Õ±°ì4(€€€€€Í¡½İ9½Ñ¥” ¡…µ…‘¼µ…É…‘¼½µ¼É•Í½±Ù¥‘¼¸œ¤ì4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€É•±½…µ¡•…±Ñ œ¤ì4(€€€€€ÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì4(€€€€€ÍÑ…Ñ”¹¡•…±Ñ €ô…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½¡•…±Ñ œ°ìµ•Ñ¡½è€A=MPœô¤ì4(€€€€€ÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ì4(€€€€€Í¡½İ9½Ñ¥” ¥…»ÍÍÑ¥¼½¹±×µ‘¼”…Éµ…é•¹…‘¼¹¼¡¥ÍÓÍÉ¥¼¸œ¤ì4(€€€€€É•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€¡•…±Ñ µ¹…Ù¥…Ñ”œ¤ì4(€€€€€¥˜€¡Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹Í•Ñ¥½¸€ôôô€ÍÕ‰ÍÉ¥ÁÑ¥½¹Ìœ€˜˜Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹™¥±Ñ•È¤ÍÑ…Ñ”¹™¥±Ñ•ÉÌ¹ÍÕ‰ÍÉ¥ÁÑ¥½¹MÑ…ÑÕÌ€ôÑ…É•Ğ¹‘…Ñ…Í•Ğ¹™¥±Ñ•Èì4(€€€€€É•ÑÕÉ¸½Á•¹M•Ñ¥½¸¡Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹Í•Ñ¥½¸¤ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€É•±½…µ±½Ìœ¤ìÍÑ…Ñ”¹±½Ì€ô¹Õ±°ìÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì…İ…¥Ğ±½…‘M•Ñ¥½¸ ±½Ìœ°ÑÉÕ”¤ìÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€É•±½…µ‰•Ñ„œ¤ìÍÑ…Ñ”¹‰•Ñ…ÁÁ±¥…Ñ¥½¹Ì€ô¹Õ±°ìÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì…İ…¥Ğ±½…‘M•Ñ¥½¸ ‰•Ñ„œ°ÑÉÕ”¤ìÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€½¹Ù•ÉĞµ‰•Ñ„œ¤ì4(€€€€€…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½‰•Ñ„µ…ÁÁ±¥…Ñ¥½¹Ìœ°ìµ•Ñ¡½è€A=MPœ°‰½‘äèì¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôô¤ì4(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ ‰•Ñ„œ°ÑÉÕ”¤ìÉ•¹‘•È ¤ìÍ¡½İ9½Ñ¥” A…ÉÑ¥¥Á…¹Ñ”É¥…‘¼”µ½Ù¥‘¼Á…É„½¹‰½…É‘¥¹œ¸œ¤ìÉ•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€•áÁ½ÉĞµ…Õ‘¥Ğœ¤ì…İ…¥Ğ‘½İ¹±½…‘Õ‘¥ÑÍØ ¤ìÉ•ÑÕÉ¸ìô4(€€€¥˜€¡…Ñ¥½¸€ôôô€…Õ‘¥ĞµÁ…”œ¤ì4(€€€€€ÍÑ…Ñ”¹™¥±Ñ•ÉÌ¹…Õ‘¥ÑA…”€ô9Õµ‰•È¡Ñ…É•Ğ¹‘…Ñ…Í•Ğ¹Á…”ñğ€Ä¤ì4(€€€€€ÍÑ…Ñ”¹±½Ì€ô¹Õ±°ìÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì4(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ ±½Ìœ°ÑÉÕ”¤ìÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€±•…Èµ…Õ‘¥Ğµ™¥±Ñ•ÉÌœ¤ì4(€€€€€=‰©•Ğ¹…ÍÍ¥¸¡ÍÑ…Ñ”¹™¥±Ñ•ÉÌ°ì…Õ‘¥ÑEÕ•Éäè€œœ°…Õ‘¥Ñ…Ñ•½Éäè€…±°œ°…Õ‘¥Ñ=ÕÑ½µ”è€…±°œ°…Õ‘¥ÑÑ½Èè€œœ°…Õ‘¥ÑÉ½´è€œœ°…Õ‘¥ÑQ¼è€œœ°…Õ‘¥ÑA…”è€Äô¤ì4(€€€€€ÍÑ…Ñ”¹±½Ì€ô¹Õ±°ìÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì4(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ ±½Ìœ°ÑÉÕ”¤ìÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€Ñ½±”µµ•¹Ôœ¤ì4(€€€€€…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½Ñ•¹…¹Ğµµ•¹Ôœ°ìµ•Ñ¡½è€AUPœ°‰½‘äèìÍÑ½É•%èÍÑ…Ñ”¹Í•±•Ñ•‘MÑ½É”°¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥°¥Ñ•´èì¥Í}…Ù…¥±…‰±”èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹…Ù…¥±…‰±”€„ôô€ÑÉÕ”œôôô¤ì4(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ …Ñ…±½œœ¤ìÉ•¹‘•È ¤ìÍ¡½İ9½Ñ¥” ¥ÍÁ½¹¥‰¥±¥‘…‘”…ÑÕ…±¥é…‘„¸œ¤ìÉ•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€‘•±•Ñ”µÁ±…¸œ¤ì4(€€€€€¥˜€ …½¹™¥É´ á±Õ¥È•ÍÑ”Á±…¹¼üÍÍ¥¹…ÑÕÉ…ÌÙ¥¹Õ±…‘…ÌÁ½‘•´¥µÁ•‘¥È„•á±ÕÏ¼¸œ¤¤É•ÑÕÉ¸ì4(€€€€€…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½Á±…¹Ìœ°ìµ•Ñ¡½è€1Qœ°‰½‘äèì¥èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹¥ôô¤ì4(€€€€€ÍÑ…Ñ”¹Á±…¹Ì€ô€¡…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½Á±…¹Ìœ¤¤¹‘…Ñ„ñğmtìÍ¡½İ9½Ñ¥” A±…¹¼•á±×µ‘¼¸œ¤ìÉ•ÑÕÉ¸ì4(€€€ô4(€€€¥˜€¡…Ñ¥½¸€ôôô€‘•±•Ñ”µ…‘µ¥¸œ¤ì4(€€€€€¥˜€ …½¹™¥É´¡I•µ½Ù•È€‘íÑ…É•Ğ¹‘…Ñ…Í•Ğ¹•µ…¥±ô‘¼½¹ÑÉ½°•¹Ñ•Èı€¤¤É•ÑÕÉ¸ì4(€€€€€…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½…‘µ¥¹¥ÍÑÉ…Ñ½ÉÌœ°ìµ•Ñ¡½è€1Qœ°‰½‘äèì•µ…¥°èÑ…É•Ğ¹‘…Ñ…Í•Ğ¹•µ…¥°°É•…Í½¸è€•ÍÍ¼É•Ù½…‘¼Á•±¼Á…¥¹•°œôô¤ì4(€€€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ …‘µ¥¹¥ÍÑÉ…Ñ½ÉÌœ°ÑÉÕ”¤ìÍ¡½İ9½Ñ¥” •ÍÍ¼É•Ù½…‘¼”¡¥ÍÓÍÉ¥¼ÁÉ•Í•ÉÙ…‘¼¸œ¤ì4(€€€ô4(€ô¤¤ì4(4(€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ¥¹ÁÕĞœ°€¡•Ù•¹Ğ¤€ôøì4(€€€½¹ÍĞÁ•Éµ¥ÍÍ¥½¹M•…É €ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µÁ•Éµ¥ÍÍ¥½¸µÍ•…É¡tœ¤ì4(€€€¥˜€¡Á•Éµ¥ÍÍ¥½¹M•…É ¤ì™¥±Ñ•ÉA•Éµ¥ÍÍ¥½¹=ÁÑ¥½¹Ì¡Á•Éµ¥ÍÍ¥½¹M•…É ¤ìÉ•ÑÕÉ¸ìô4(€€€½¹ÍĞ¥¹ÁÕĞ€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µÍ•…É¡tœ¤ì4(€€€¥˜€ …¥¹ÁÕĞ¤É•ÑÕÉ¸ì4(€€€½¹ÍĞ­•ä€ô¥¹ÁÕĞ¹‘…Ñ…Í•Ğ¹Í•…É ì4(€€€¥˜€¡­•ä€ôôô€±½‰…°œ¤ÍÑ…Ñ”¹±½‰…±EÕ•Éä€ô¥¹ÁÕĞ¹Ù…±Õ”ì4(€€€•±Í”ÍÑ…Ñ”¹™¥±Ñ•ÉÍm­•åt€ô¥¹ÁÕĞ¹Ù…±Õ”ì4(€€€É•¹‘•È¡­•ä¤ì4(€ô¤ì4(4(€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ¡…¹”œ°€¡•Ù•¹Ğ¤€ôøÍ…™”¡…Íå¹Œ€ ¤€ôøì(€€€½¹ÍĞÁ•Éµ¥ÍÍ¥½¸€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ¥¹ÁÕÑmÑåÁ”ô‰¡•­‰½à‰um¹…µ”ô‰Á•Éµ¥ÍÍ¥½¹Ì‰tœ¤ì(€€€¥˜€¡Á•Éµ¥ÍÍ¥½¸¤ìÕÁ‘…Ñ•A•Éµ¥ÍÍ¥½¹MÕµµ…Éä¡Á•Éµ¥ÍÍ¥½¸¹±½Í•ÍĞ ™½É´œ¤¤ìÉ•ÑÕÉ¸ìô4(€€€½¹ÍĞ™¥±Ñ•È€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µ™¥±Ñ•Étœ¤ì4(€€€¥˜€¡™¥±Ñ•È¤ìÍÑ…Ñ”¹™¥±Ñ•ÉÍm™¥±Ñ•È¹‘…Ñ…Í•Ğ¹™¥±Ñ•Ét€ô™¥±Ñ•È¹Ù…±Õ”ìÉ•¹‘•È ¤ìÉ•ÑÕÉ¸ìô4(€€€½¹ÍĞÕÍÑ½µ•ÉM•±•Ğ€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µ…Ñ¥½¸ô‰Í•±•ĞµÑ•¹…¹Ğ‰tœ¤ì4(€€€½¹ÍĞÍÑ½É•M•±•Ğ€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µ…Ñ¥½¸ô‰Í•±•ĞµÍÑ½É”‰tœ¤ì4(€€€¥˜€ …ÕÍÑ½µ•ÉM•±•Ğ€˜˜€…ÍÑ½É•M•±•Ğ¤É•ÑÕÉ¸ì4(€€€¥˜€¡ÕÍÑ½µ•ÉM•±•Ğ¤ì4(€€€€€ÍÑ…Ñ”¹Í•±•Ñ•‘Q•¹…¹Ğ€ôÕÍÑ½µ•ÉM•±•Ğ¹Ù…±Õ”ì4(€€€€€½¹ÍĞÑ•¹…¹Ğ€ôÍÑ…Ñ”¹Ñ•¹…¹ÑÌ¹™¥¹ ¡¥Ñ•´¤€ôøMÑÉ¥¹œ¡¥Ñ•´¹…½Õ¹Ñ%ñğ¥Ñ•´¹¥¤€ôôôMÑÉ¥¹œ¡ÍÑ…Ñ”¹Í•±•Ñ•‘Q•¹…¹Ğ¤¤ì4(€€€€€ÍÑ…Ñ”¹Í•±•Ñ•‘MÑ½É”€ôÑ•¹…¹Ğü¹ÍÑ½É•Ìü¹lÁtü¹ÍÑ½É•%ñğÑ•¹…¹Ğü¹ÍÑ½É•Ìü¹lÁtü¹¥ñğ€œœì4(€€€ô4(€€€¥˜€¡ÍÑ½É•M•±•Ğ¤ÍÑ…Ñ”¹Í•±•Ñ•‘MÑ½É”€ôÍÑ½É•M•±•Ğ¹Ù…±Õ”ì4(€€€ÍÑ…Ñ”¹™¥±Ñ•ÉÌ¹…Ñ…±½…Ñ•½Éä€ô€…±°œì4(€€€ÍÑ…Ñ”¹±½…‘¥¹œ€ôÑÉÕ”ìÉ•¹‘•È ¤ì4(€€€…İ…¥Ğ±½…‘M•Ñ¥½¸ …Ñ…±½œœ¤ì4(€€€ÍÑ…Ñ”¹±½…‘¥¹œ€ô™…±Í”ìÉ•¹‘•È ¤ì(€ô¤¤ì((€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‘É…ÍÑ…ÉĞœ°€¡•Ù•¹Ğ¤€ôøì(€€€½¹ÍĞ…É€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µİ½É¬µ­•åum‘É……‰±”ô‰ÑÉÕ”‰tœ¤ì(€€€¥˜€ ……ÉñğÍÑ…Ñ”¹İ½É­Y¥•Ü€ôôô€É…‘…Èœ¤É•ÑÕÉ¸ì(€€€‘É…•‘]½É­-•ä€ô…É¹‘…Ñ…Í•Ğ¹İ½É­-•äñğ€œœì(€€€…É¹±…ÍÍ1¥ÍĞ¹…‘ ‘É…¥¹œœ¤ì(€€€•Ù•¹Ğ¹‘…Ñ…QÉ…¹Í™•È¹•™™•Ñ±±½İ•€ô€µ½Ù”œì(€€€•Ù•¹Ğ¹‘…Ñ…QÉ…¹Í™•È¹Í•Ñ…Ñ„ Ñ•áĞ½Á±…¥¸œ°‘É…•‘]½É­-•ä¤ì(€ô¤ì((€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‘É…•¹œ°€¡•Ù•¹Ğ¤€ôøì(€€€•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µİ½É¬µ­•åtœ¤ü¹±…ÍÍ1¥ÍĞ¹É•µ½Ù” ‘É…¥¹œœ¤ì(€€€‘½Õµ•¹Ğ¹ÅÕ•ÉåM•±•Ñ½É±° m‘…Ñ„µ‘É½Àµ±…¹•t¹‘É…œµ½Ù•Èœ¤¹™½É…  ¡±…¹”¤€ôø±…¹”¹±…ÍÍ1¥ÍĞ¹É•µ½Ù” ‘É…œµ½Ù•Èœ¤¤ì(€€€‘É…•‘]½É­-•ä€ô€œœì(€ô¤ì((€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‘É…½Ù•Èœ°€¡•Ù•¹Ğ¤€ôøì(€€€½¹ÍĞ±…¹”€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µ‘É½Àµ±…¹•tœ¤ì(€€€¥˜€ …±…¹”ñğ€…‘É…•‘]½É­-•äñğÍÑ…Ñ”¹İ½É­Y¥•Ü€ôôô€É…‘…Èœ¤É•ÑÕÉ¸ì(€€€•Ù•¹Ğ¹ÁÉ•Ù•¹Ñ•™…Õ±Ğ ¤ì(€€€•Ù•¹Ğ¹‘…Ñ…QÉ…¹Í™•È¹‘É½Á™™•Ğ€ô€µ½Ù”œì(€€€‘½Õµ•¹Ğ¹ÅÕ•ÉåM•±•Ñ½É±° m‘…Ñ„µ‘É½Àµ±…¹•t¹‘É…œµ½Ù•Èœ¤¹™½É…  ¡¥Ñ•´¤€ôø¥Ñ•´€„ôô±…¹”€˜˜¥Ñ•´¹±…ÍÍ1¥ÍĞ¹É•µ½Ù” ‘É…œµ½Ù•Èœ¤¤ì(€€€±…¹”¹±…ÍÍ1¥ÍĞ¹…‘ ‘É…œµ½Ù•Èœ¤ì(€ô¤ì((€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‘É…±•…Ù”œ°€¡•Ù•¹Ğ¤€ôøì(€€€½¹ÍĞ±…¹”€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µ‘É½Àµ±…¹•tœ¤ì(€€€¥˜€¡±…¹”€˜˜€…±…¹”¹½¹Ñ…¥¹Ì¡•Ù•¹Ğ¹É•±…Ñ•‘Q…É•Ğ¤¤±…¹”¹±…ÍÍ1¥ÍĞ¹É•µ½Ù” ‘É…œµ½Ù•Èœ¤ì(€ô¤ì((€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ‘É½Àœ°€¡•Ù•¹Ğ¤€ôøì(€€€½¹ÍĞ±…¹”€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ m‘…Ñ„µ‘É½Àµ±…¹•tœ¤ì(€€€¥˜€ …±…¹”ñğÍÑ…Ñ”¹İ½É­Y¥•Ü€ôôô€É…‘…Èœ¤É•ÑÕÉ¸ì(€€€•Ù•¹Ğ¹ÁÉ•Ù•¹Ñ•™…Õ±Ğ ¤ì(€€€½¹ÍĞ­•ä€ô‘É…•‘]½É­-•äñğ•Ù•¹Ğ¹‘…Ñ…QÉ…¹Í™•È¹•Ñ…Ñ„ Ñ•áĞ½Á±…¥¸œ¤ì(€€€½¹ÍĞÑ…É•ÑMÑ…ÑÕÌ€ôİ½É­1…¹•Q…É•Ğ¡ÍÑ…Ñ”¹İ½É­Y¥•Ü°±…¹”¹‘…Ñ…Í•Ğ¹‘É½Á1…¹”¤ì(€€€‘½Õµ•¹Ğ¹ÅÕ•ÉåM•±•Ñ½É±° m‘…Ñ„µ‘É½Àµ±…¹•t¹‘É…œµ½Ù•Èœ¤¹™½É…  ¡¥Ñ•´¤€ôø¥Ñ•´¹±…ÍÍ1¥ÍĞ¹É•µ½Ù” ‘É…œµ½Ù•Èœ¤¤ì(€€€‘É…•‘]½É­-•ä€ô€œœì(€€€¥˜€ …­•äñğ€…Ñ…É•ÑMÑ…ÑÕÌ¤É•ÑÕÉ¸ì(€€€ÍÑ…Ñ”¹µ½‘…°€ôìÑåÁ”è€İ½É¬µ¥Ñ•´œ°­•ä°Ñ…É•ÑMÑ…ÑÕÌôì(€€€É•¹‘•È ¤ì(€ô¤ì((€‘½Õµ•¹Ğ¹…‘‘Ù•¹Ñ1¥ÍÑ•¹•È ­•å‘½İ¸œ°€¡•Ù•¹Ğ¤€ôøì(€€€¥˜€ ¡•Ù•¹Ğ¹ÑÉ±-•äñğ•Ù•¹Ğ¹µ•Ñ…-•ä¤€˜˜•Ù•¹Ğ¹­•ä¹Ñ½1½İ•É…Í” ¤€ôôô€¬œ¤ì4(€€€€€•Ù•¹Ğ¹ÁÉ•Ù•¹Ñ•™…Õ±Ğ ¤ì4(€€€€€‘½Õµ•¹Ğ¹ÅÕ•ÉåM•±•Ñ½È m‘…Ñ„µÍ•…É ô‰±½‰…°‰tœ¤ü¹™½ÕÌ ¤ì4(€€€ô4(€€€¥˜€¡•Ù•¹Ğ¹­•ä€ôôô€Í…Á”œ¤ì4(€€€€€ÍÑ…Ñ”¹µ½‘…°€ô¹Õ±°ì4(€€€€€ÍÑ…Ñ”¹Í¥‘•‰…É=Á•¸€ô™…±Í”ì4(€€€€€ÍÑ…Ñ”¹±½‰…±EÕ•Éä€ô€œœì4(€€€€€É•¹‘•È ¤ì4(€€€ô4(€€€¥˜€ ¡•Ù•¹Ğ¹ÑÉ±-•äñğ•Ù•¹Ğ¹µ•Ñ…-•ä¤€˜˜•Ù•¹Ğ¹­•ä€ôôô€¹Ñ•Èœ¤ì4(€€€€€½¹ÍĞ™½É´€ô•Ù•¹Ğ¹Ñ…É•Ğ¹±½Í•ÍĞ ™½Éµm‘…Ñ„µ™½É´ô‰É•Á±ä‰tœ¤ì4(€€€€€¥˜€¡™½É´¤ì4(€€€€€€€•Ù•¹Ğ¹ÁÉ•Ù•¹Ñ•™…Õ±Ğ ¤ì4(€€€€€€€™½É´¹É•ÅÕ•ÍÑMÕ‰µ¥Ğ ¤ì4(€€€€€ô4(€€€ô4(€ô¤ì4(4(€…Íå¹Œ™Õ¹Ñ¥½¸‰½½Ğ ¤ì4(€€€É•¹‘•È ¤ì4(€€€¥˜€¡ÍÑ…Ñ”¹¥¹Ù¥Ñ•5½‘”¤É•ÑÕÉ¸ì4(€€€¥˜€ …½¹™¥ÕÉ• ¤ñğ€…ÍÑ…Ñ”¹Ñ½­•¸¤É•ÑÕÉ¸ì4(€€€ÑÉäì4(€€€€€ÍÑ…Ñ”¹ÕÍ•È€ô€¡…İ…¥Ğ…Á¤ œ½…Á¤½…‘µ¥¸½Í•ÍÍ¥½¸œ¤¤¹‘…Ñ„ì4(€€€€€¥˜€¡…İ…¥ĞÁÉ•Á…É•5™„ ¤¤É•ÑÕÉ¸ì4(€€€€€…İ…¥Ğ±½…‘½É” ¤ì4(€€€ô…Ñ ì4(€€€€€…İ…¥ĞÍ¥¹=ÕĞ ¤ì4(€€€€€Í¡½İ9½Ñ¥” MÕ„Í•ÍÏ¼•áÁ¥É½Ô¸¹ÑÉ”¹½Ù…µ•¹Ñ”¸œ°€•ÉÉ½Èœ¤ì4(€€€ô4(€ô4(4(€‰½½Ğ ¤ì4)ô¤ ¤ì4(

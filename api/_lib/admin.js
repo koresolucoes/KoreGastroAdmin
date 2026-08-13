@@ -48,7 +48,8 @@ const ROUTE_CAPABILITIES = Object.freeze({
   health: { GET: 'health.read', POST: 'health.run' },
   logs: { GET: 'audit.read' },
   administrators: { GET: 'access.read', POST: 'access.manage', PUT: 'access.manage', PATCH: 'access.manage', DELETE: 'access.manage' },
-  'beta-applications': { GET: 'beta.read', PATCH: 'beta.manage', POST: 'beta.manage' }
+  'beta-applications': { GET: 'beta.read', PATCH: 'beta.manage', POST: 'beta.manage' },
+  'work-board': { GET: 'dashboard.read' }
 });
 
 function config() {
@@ -358,6 +359,7 @@ function auditCategory(action) {
   if (/ACCESS|ADMINISTRATOR|SESSION|MFA/.test(action)) return 'access';
   if (/SUBSCRIPTION|INVOICE|PAYMENT/.test(action)) return 'billing';
   if (/SUPPORT|TICKET|MESSAGE/.test(action)) return 'support';
+  if (/BETA/.test(action)) return 'beta';
   if (/PLAN|MENU|CATALOG/.test(action)) return 'product';
   if (/TENANT|CUSTOMER|PROVISION/.test(action)) return 'customer';
   return 'system';

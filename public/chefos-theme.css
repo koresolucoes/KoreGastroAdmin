@@ -242,6 +242,166 @@ body::after {
   box-shadow: var(--shadow);
 }
 
+.page-header .eyebrow,
+.panel-heading .eyebrow,
+.invite-card .eyebrow {
+  color: var(--accent-light);
+}
+
+.page-header .muted,
+.panel-heading p,
+.invite-card p,
+.modal-body p,
+.drawer-title > p:not(.eyebrow) {
+  color: #a89a8c;
+}
+
+.page-header h1 {
+  max-width: 18ch;
+}
+
+.page-header .header-actions,
+.panel-heading > div:last-child {
+  gap: 10px;
+}
+
+.summary-strip > div {
+  position: relative;
+}
+
+.summary-strip > div::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(221, 103, 31, .78), transparent);
+  opacity: .85;
+}
+
+.summary-strip strong,
+.metric-card strong {
+  color: #fff8f1;
+}
+
+.metric-card small,
+.summary-strip small {
+  color: var(--muted-2);
+}
+
+th {
+  background: #0d1219;
+  color: #7a8698;
+}
+
+tbody tr:hover td {
+  background: rgba(255, 255, 255, .015);
+}
+
+.row-action {
+  border-radius: 999px;
+  background: rgba(23, 29, 39, .95);
+}
+
+.row-action:hover {
+  border-color: rgba(255, 184, 135, .3);
+  color: #fff;
+}
+
+.status,
+.priority,
+.health-signal,
+.sla,
+.count-badge,
+.root-badge {
+  border-radius: 999px;
+}
+
+.priority {
+  background: rgba(255, 255, 255, .04);
+}
+
+.health-signal,
+.sla {
+  border: 1px solid transparent;
+}
+
+.plan-card {
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, rgba(18, 22, 29, .98), rgba(14, 17, 23, .96));
+}
+
+.plan-card.featured {
+  border-color: rgba(255, 122, 61, .4);
+  box-shadow: inset 0 2px 0 var(--accent), 0 22px 55px rgba(0, 0, 0, .24);
+}
+
+.plan-card > header small {
+  color: var(--accent-light);
+}
+
+.plan-price strong {
+  color: #fff6ef;
+}
+
+.billing-state {
+  border: 1px solid transparent;
+}
+
+.modal-shell,
+.drawer-shell {
+  backdrop-filter: blur(6px);
+}
+
+.modal-backdrop {
+  background: rgba(4, 6, 9, .8);
+}
+
+.modal-card,
+.detail-drawer {
+  border-radius: 22px;
+}
+
+.modal-card > header,
+.detail-drawer > header {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .02), transparent);
+}
+
+.login-security,
+.secure-note,
+.system-pill,
+.user-card,
+.access-status,
+.mfa-state,
+.invite-icon,
+.empty-conversation,
+.drawer-all-clear,
+.drawer-checklist > div,
+.credential-list > div,
+.modal-alert,
+.onboarding-note,
+.security-reminder {
+  border-radius: 16px;
+}
+
+.login-security,
+.secure-note,
+.system-pill,
+.drawer-all-clear,
+.onboarding-note,
+.security-reminder {
+  background: rgba(255, 255, 255, .02);
+}
+
+.access-status,
+.mfa-state {
+  border: 1px solid rgba(255, 255, 255, .06);
+}
+
+.invite-icon {
+  background: var(--accent-soft);
+  color: var(--accent-light);
+}
+
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 1fr;

@@ -11,6 +11,7 @@ const required = [
   'api/_lib/admin.js',
   'api/_lib/plan-permissions.js',
   'api/_lib/customers.js',
+  'api/_lib/beta-operations.js',
   'api/admin/session.js',
   'api/admin/customers.js',
   'api/admin/dashboard.js',
@@ -24,7 +25,9 @@ const required = [
   'api/admin/health.js',
   'api/admin/logs.js',
   'api/admin/beta-applications.js',
+  'api/admin/work-board.js',
   'api/public/beta-application.js',
+  'supabase/migrations/20260813135859_operational_kanban.sql',
   'supabase/migrations/202608120001_beta_minimum_flow.sql',
   'supabase/migrations/202608090001_admin_control_center.sql'
 ];
@@ -55,6 +58,13 @@ for (const endpoint of ['/api/admin/administrators', '/api/admin/health', '/api/
   if (!appSource.includes(endpoint)) throw new Error(`Frontend não consome o endpoint de controle ${endpoint}`);
 }
 if (!appSource.includes('/api/admin/beta-applications')) throw new Error('Frontend não consome o pipeline mínimo do beta.');
+for (const marker of ['Operação do beta', 'beta-application', 'Movimentações da candidatura', 'beta_ends_at', 'ciclo de 90 dias']) {
+  if (!appSource.includes(marker)) throw new Error(`Fluxo operacional do beta incompleto: ${marker}`);
+}
+if (!appSource.includes('/api/admin/work-board')) throw new Error('Frontend não consome o Kanban operacional.');
+for (const marker of ['Radar inteligente', 'Prioridade explicável', 'data-drop-lane', 'work-item']) {
+  if (!appSource.includes(marker)) throw new Error(`Kanban operacional incompleto: ${marker}`);
+}
 
 for (const marker of ['invite-password', '/factors/', 'challenge_id', 'mfaMode']) {
   if (!appSource.includes(marker)) throw new Error(`Fluxo de convite/MFA incompleto: ${marker}`);
@@ -78,6 +88,11 @@ if (!adminSource.includes('process.env.SUPABASE_SECRET_KEY') || !healthSource.in
 const migrationSource = await readFile('supabase/migrations/202608090001_admin_control_center.sql', 'utf8');
 for (const marker of ['drop policy if exists "Admins can manage admins"', 'protect_last_admin_owner', 'admin_health_snapshots', 'admin_audit_events']) {
   if (!migrationSource.includes(marker)) throw new Error(`Migração administrativa incompleta: ${marker}`);
+}
+
+const kanbanMigrationSource = await readFile('supabase/migrations/20260813135859_operational_kanban.sql', 'utf8');
+for (const marker of ['admin_work_items_single_source_check', 'enable row level security', 'revoke all on public.admin_work_items from anon, authenticated', 'support_ticket_messages_ticket_created_idx']) {
+  if (!kanbanMigrationSource.includes(marker)) throw new Error(`Migração do Kanban incompleta: ${marker}`);
 }
 
 const files = (await Promise.all(['api', 'public', 'scripts'].map((directory) => sourceFiles(resolve(directory))))).flat();
