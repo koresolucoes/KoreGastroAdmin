@@ -1,0 +1,15 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="chefosMark" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB887" />
+      <stop offset="0.5" stop-color="#DD671F" />
+      <stop offset="1" stop-color="#B54911" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="#0F141C" />
+  <path d="M32 10L19 23.5C15.7 27 14 30.7 14 35.3C14 45.3 22.4 54 32 54C41.6 54 50 45.3 50 35.3C50 30.7 48.3 27 45 23.5L32 10Z" fill="url(#chefosMark)"/>
+  <path d="M32 16L25 24.5C22.9 27.1 22 29.4 22 32.5C22 39.5 27.4 45 32 45C36.6 45 42 39.5 42 32.5C42 29.4 41.1 27.1 39 24.5L32 16Z" fill="#0F141C" opacity="0.9"/>
+  <circle cx="24.5" cy="27" r="1.7" fill="#F7F4EE" opacity="0.95" />
+  <circle cx="39.5" cy="27" r="1.7" fill="#F7F4EE" opacity="0.95" />
+  <path d="M21 48.5C23.7 42.8 26.9 40 32 40C37.1 40 40.3 42.8 43 48.5" stroke="#F7F4EE" stroke-opacity="0.85" stroke-width="3" stroke-linecap="round"/>
+</svg>
