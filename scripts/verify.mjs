@@ -8,6 +8,7 @@ const required = [
   'vercel.json',
   'public/app.js',
   'public/admin.css',
+  'public/chefos-theme.css',
   'api/_lib/admin.js',
   'api/_lib/plan-permissions.js',
   'api/_lib/customers.js',
@@ -27,6 +28,9 @@ const required = [
   'api/admin/beta-applications.js',
   'api/admin/work-board.js',
   'api/public/beta-application.js',
+  'tests/admin-ux-contract.test.mjs',
+  'tests/beta-state-machine.test.mjs',
+  'references/admin-ux-principles.md',
   'supabase/migrations/20260813135859_operational_kanban.sql',
   'supabase/migrations/202608120001_beta_minimum_flow.sql',
   'supabase/migrations/202608090001_admin_control_center.sql'

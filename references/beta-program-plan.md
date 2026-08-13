@@ -80,3 +80,34 @@ Validação concluída antes da publicação:
 - revisão visual aprovada em desktop e mobile, com alternativa acessível ao arrastar e soltar.
 
 Ainda faltam e-mails automáticos, feedback pós-uso, métricas, onboarding guiado e preparo para a transição beta → lançamento.
+
+## Revisão de experiência do Admin
+
+Status: fundação Nielsen implementada no branch de revisão do painel.
+
+Decisões incorporadas:
+
+- navegação organizada por Trabalho, Relacionamento, Receita, Produto e Administração;
+- seção atual preservada na URL, com histórico do navegador, título coerente e retorno à posição inicial;
+- visibilidade e ações condicionadas às capacidades reais do perfil administrativo;
+- carregamento e falha tratados por seção, sem transformar erro parcial em sessão expirada;
+- formulários preservam o conteúdo em falhas, impedem envio duplicado e alertam antes de descartar alterações;
+- modais possuem foco inicial, contenção de teclado, fechamento seguro e retorno do foco;
+- tipografia, contraste, alvos de toque, superfícies e responsividade consolidados em um único design system ChefOS;
+- credenciais do onboarding recebem confirmação antes de sair da tela de exibição única;
+- o frontend consome a matriz de etapas válida devolvida pelo backend e nunca oferece saltos arbitrários no beta;
+- movimentações concorrentes do beta usam a versão `updated_at` e retornam conflito em vez de sobrescrever trabalho mais recente.
+
+Máquina de estados operacional do beta:
+
+- `new → review | closed`
+- `review → new | contact | closed`
+- `contact → review | interview | closed`
+- `interview → contact | approved | closed`
+- `approved → interview | onboarding | closed`
+- `onboarding → active | closed`
+- `active → completed | closed`
+- `completed → converted | closed`
+- `converted` e `closed` são etapas terminais.
+
+O participante é criado ao entrar em onboarding. O período gratuito de 90 dias começa apenas na transição de onboarding para beta ativo, preservando as datas reais até conclusão ou conversão.

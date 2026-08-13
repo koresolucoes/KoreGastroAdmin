@@ -5,13 +5,26 @@
   const app = document.querySelector('#app');
   const authHash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
   const inviteToken = authHash.get('type') === 'invite' ? authHash.get('access_token') : '';
+  const ROUTE_PATHS = Object.freeze({
+    overview: 'inicio', mywork: 'minha-fila', workboard: 'kanban', tenants: 'clientes', support: 'suporte',
+    beta: 'beta', subscriptions: 'assinaturas', plans: 'planos', catalog: 'cardapios',
+    administrators: 'equipe', logs: 'auditoria', health: 'saude', provision: 'novo-cliente'
+  });
+  const PATH_SECTIONS = Object.fromEntries(Object.entries(ROUTE_PATHS).map(([section, path]) => [path, section]));
+  const sectionFromLocation = () => PATH_SECTIONS[window.location.hash.match(/^#\/([^?]+)/)?.[1]] || 'overview';
   const state = {
     token: inviteToken || sessionStorage.getItem('koregastro_admin_token') || '',
     inviteMode: Boolean(inviteToken),
     mfaMode: null,
     user: null,
-    section: 'overview',
+    section: sectionFromLocation(),
     loading: false,
+    restoringSession: Boolean(!inviteToken && (inviteToken || sessionStorage.getItem('koregastro_admin_token'))),
+    sectionLoading: '',
+    sectionError: null,
+    pendingAction: '',
+    navigationSequence: 0,
+    pageDirty: false,
     dashboard: null,
     tenants: [],
     customerSummary: null,
@@ -35,11 +48,14 @@
     logs: null,
     betaApplications: null,
     betaSummary: null,
+    betaTransitions: null,
     workCards: null,
     workMeta: null,
     workView: 'radar',
     notice: null,
     modal: null,
+    modalDirty: false,
+    modalReturn: null,
     sidebarOpen: false,
     globalQuery: '',
     filters: {
@@ -50,20 +66,35 @@
     }
   };
   let draggedWorkKey = '';
+  let searchTimer = 0;
 
   const navigation = [
-    { label: 'Operação', items: [
-      ['overview', 'Visão geral', '⌂'], ['workboard', 'Kanban operacional', '▦'], ['subscriptions', 'Assinaturas', '◎'],
-      ['tenants', 'Clientes', '◫'], ['beta', 'Programa beta', '★'], ['support', 'Suporte', '✦']
+    { label: 'Trabalho', items: [
+      ['overview', 'Início', '⌂'], ['mywork', 'Minha fila', '✓'], ['workboard', 'Kanban', '▦']
+    ] },
+    { label: 'Relacionamento', items: [
+      ['tenants', 'Clientes', '◫'], ['support', 'Suporte', '✦'], ['beta', 'Programa beta', '★']
+    ] },
+    { label: 'Receita', items: [
+      ['subscriptions', 'Assinaturas', '◎'], ['plans', 'Planos', '◇']
     ] },
     { label: 'Produto', items: [
-      ['plans', 'Planos', '◇'], ['catalog', 'Cardápios', '≡'], ['provision', 'Onboarding', '+']
+      ['catalog', 'Cardápios', '≡']
     ] },
-    { label: 'Sistema', items: [
-      ['health', 'Saúde', '♥'], ['logs', 'Auditoria', '≋'], ['administrators', 'Acessos', '⚙']
+    { label: 'Administração', items: [
+      ['administrators', 'Equipe e acessos', '⚙'], ['logs', 'Auditoria', '≋'], ['health', 'Saúde do sistema', '♥']
     ] }
   ];
-  const sectionLabels = Object.fromEntries(navigation.flatMap((group) => group.items.map(([key, label]) => [key, label])));
+  const sectionLabels = {
+    ...Object.fromEntries(navigation.flatMap((group) => group.items.map(([key, label]) => [key, label]))),
+    provision: 'Novo cliente'
+  };
+  const SECTION_CAPABILITIES = Object.freeze({
+    overview: ['dashboard.read'], mywork: ['dashboard.read'], workboard: ['dashboard.read'],
+    tenants: ['customers.read'], support: ['support.read'], beta: ['beta.read'],
+    subscriptions: ['subscriptions.read'], plans: ['plans.read'], catalog: ['catalog.read'],
+    provision: ['onboarding.manage'], administrators: ['access.read'], logs: ['audit.read'], health: ['health.read']
+  });
 
   const escape = (value = '') => String(value)
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -95,6 +126,13 @@
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   };
   const can = (capability) => Boolean(state.user?.capabilities?.includes('*') || state.user?.capabilities?.includes(capability));
+  const canAny = (capabilities = []) => capabilities.some(can);
+  const canOpenSection = (section) => !state.user || canAny(SECTION_CAPABILITIES[section] || []);
+  const betaTransitionMap = () => state.betaTransitions || state.workMeta?.betaTransitions || {};
+  const betaAllowedStatuses = (currentStatus) => [...new Set([
+    currentStatus,
+    ...(betaTransitionMap()[currentStatus] || [])
+  ])].filter((status) => BETA_STAGES.includes(status));
   const roleLabel = (role) => ({ owner: 'Proprietário', platform_admin: 'Administrador', finance: 'Financeiro', support: 'Suporte', auditor: 'Auditor' }[role] || role || 'Administrador');
   const accessStatusLabel = (value) => ({ invited: 'Convite pendente', active: 'Ativo', suspended: 'Suspenso', revoked: 'Revogado' }[value] || value || 'Desconhecido');
   const healthStatusLabel = (value) => ({ ok: 'Operacional', attention: 'Atenção', degraded: 'Degradado', critical: 'Crítico', unknown: 'Desconhecido', healthy: 'Operacional' }[value] || value);
@@ -234,12 +272,51 @@
     return `<span class="health-signal success"><i></i>${remaining} dia(s) restantes</span>`;
   }
 
-  function showNotice(text, type = 'success') {
+  function noticeMarkup() {
+    if (!state.notice) return '';
+    return `<div class='notice ${escape(state.notice.type)}' role='${state.notice.type === 'error' ? 'alert' : 'status'}'><span>${state.notice.type === 'error' ? '!' : '✓'}</span>${escape(state.notice.text)}<button type='button' data-action='dismiss-notice' aria-label='Fechar aviso'>×</button></div>`;
+  }
+
+  function updateNoticeRegion() {
+    document.querySelectorAll('[data-notice-region]').forEach((region) => { region.innerHTML = noticeMarkup(); });
+  }
+
+  function showNotice(text, type = 'success', rerender = true) {
     state.notice = { text, type };
-    render();
+    if (rerender) render();
+    else updateNoticeRegion();
     window.setTimeout(() => {
-      if (state.notice?.text === text) { state.notice = null; render(); }
+      if (state.notice?.text === text) { state.notice = null; updateNoticeRegion(); }
     }, 5000);
+  }
+
+  function setPendingElement(element, pending) {
+    if (!element) return;
+    const buttons = element.matches?.('form') ? [...element.querySelectorAll('button[type="submit"]')] : [element];
+    element.setAttribute('aria-busy', pending ? 'true' : 'false');
+    buttons.forEach((button) => {
+      if (pending) {
+        button.dataset.pendingLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Aguarde…';
+      } else {
+        button.disabled = false;
+        if (button.dataset.pendingLabel) button.textContent = button.dataset.pendingLabel;
+        delete button.dataset.pendingLabel;
+      }
+    });
+  }
+
+  async function withPending(key, element, action) {
+    if (state.pendingAction) return;
+    state.pendingAction = key;
+    setPendingElement(element, true);
+    try {
+      return await action();
+    } finally {
+      if (state.pendingAction === key) state.pendingAction = '';
+      if (element?.isConnected) setPendingElement(element, false);
+    }
   }
 
   async function api(path, options = {}) {
@@ -253,7 +330,11 @@
       body: options.body ? JSON.stringify(options.body) : undefined
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error || 'Não foi possível concluir a operação.');
+    if (!response.ok) {
+      const error = new Error(body.error || 'Não foi possível concluir a operação.');
+      error.status = response.status;
+      throw error;
+    }
     return body;
   }
 
@@ -264,7 +345,11 @@
       body: options.body ? JSON.stringify(options.body) : undefined
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.msg || body.message || body.error_description || 'Não foi possível validar o segundo fator.');
+    if (!response.ok) {
+      const error = new Error(body.msg || body.message || body.error_description || 'Não foi possível validar o segundo fator.');
+      error.status = response.status;
+      throw error;
+    }
     return body;
   }
 
@@ -311,7 +396,7 @@
     sessionStorage.setItem('koregastro_admin_token', state.token);
     state.mfaMode = null;
     state.user = (await api('/api/admin/session')).data;
-    await loadCore();
+    await finishAuthenticatedBoot();
     showNotice('Segundo fator confirmado. Sessão administrativa protegida.');
   }
 
@@ -325,7 +410,13 @@
     if (!response.ok || !body.access_token) throw new Error(body.error_description || 'Credenciais inválidas.');
     state.token = body.access_token;
     sessionStorage.setItem('koregastro_admin_token', state.token);
-    state.user = (await api('/api/admin/session')).data;
+    try {
+      state.user = (await api('/api/admin/session')).data;
+    } catch (error) {
+      sessionStorage.removeItem('koregastro_admin_token');
+      state.token = '';
+      throw error;
+    }
     return !(await prepareMfa(body.user));
   }
 
@@ -344,7 +435,7 @@
     state.inviteMode = false;
     state.user = (await api('/api/admin/session')).data;
     if (await prepareMfa()) return;
-    await loadCore();
+    await finishAuthenticatedBoot();
     showNotice('Convite aceito. Seu acesso administrativo está ativo.');
   }
 
@@ -355,36 +446,60 @@
       });
     } finally {
       sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null, betaApplications: null, betaSummary: null, workCards: null, workMeta: null, modal: null });
+      Object.assign(state, { token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', selectedTicketId: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null, betaApplications: null, betaSummary: null, betaTransitions: null, workCards: null, workMeta: null, modal: null, modalDirty: false, modalReturn: null, pageDirty: false, pendingAction: '', sectionLoading: '', sectionError: null, sidebarOpen: false, globalQuery: '', notice: null });
       render();
     }
   }
 
-  async function loadCore() {
-    state.loading = true;
-    render();
+  async function loadCore({ silent = false } = {}) {
+    if (!silent) {
+      state.sectionLoading = state.section;
+      state.sectionError = null;
+      render();
+    }
     try {
-      const [dashboard, customers, plans, tickets] = await Promise.all([
-        api('/api/admin/dashboard'), api('/api/admin/customers?pageSize=500'), api('/api/admin/plans'), api('/api/admin/tickets')
-      ]);
-      state.dashboard = dashboard.data;
-      state.tenants = customers.data || [];
-      state.customerSummary = customers.summary || null;
-      state.customerMeta = customers.meta || null;
-      state.plans = plans.data || [];
-      state.permissionCatalog = plans.permissionCatalog || [];
-      state.tickets = tickets.data || [];
-      state.ticketSummary = tickets.summary || null;
-      state.ticketMeta = tickets.meta || null;
+      const requests = [
+        ['dashboard', 'dashboard.read', '/api/admin/dashboard'],
+        ['customers', 'customers.read', '/api/admin/customers?pageSize=500'],
+        ['plans', 'plans.read', '/api/admin/plans'],
+        ['tickets', 'support.read', '/api/admin/tickets']
+      ].filter(([, capability]) => can(capability));
+      const settled = await Promise.allSettled(requests.map(([, , endpoint]) => api(endpoint)));
+      const results = Object.fromEntries(requests.map(([key], index) => [key, settled[index]]));
+      if (results.dashboard?.status === 'fulfilled') state.dashboard = results.dashboard.value.data;
+      if (results.customers?.status === 'fulfilled') {
+        state.tenants = results.customers.value.data || [];
+        state.customerSummary = results.customers.value.summary || null;
+        state.customerMeta = results.customers.value.meta || null;
+      }
+      if (results.plans?.status === 'fulfilled') {
+        state.plans = results.plans.value.data || [];
+        state.permissionCatalog = results.plans.value.permissionCatalog || [];
+      }
+      if (results.tickets?.status === 'fulfilled') {
+        state.tickets = results.tickets.value.data || [];
+        state.ticketSummary = results.tickets.value.summary || null;
+        state.ticketMeta = results.tickets.value.meta || null;
+      }
       if (!state.selectedTenant && state.tenants[0]) state.selectedTenant = state.tenants[0].accountId || state.tenants[0].id;
       const selectedCustomer = state.tenants.find((tenant) => String(tenant.accountId || tenant.id) === String(state.selectedTenant));
       if (!selectedCustomer?.stores?.some((store) => String(store.storeId || store.id) === String(state.selectedStore))) {
         state.selectedStore = selectedCustomer?.stores?.[0]?.storeId || selectedCustomer?.stores?.[0]?.id || '';
       }
-      if (!state.selectedTicketId && state.tickets[0]) state.selectedTicketId = state.tickets[0].id;
+      if (!state.selectedTicketId && state.tickets?.[0]) state.selectedTicketId = state.tickets[0].id;
+      const failures = settled.filter((result) => result.status === 'rejected').map((result) => result.reason);
+      if (failures.length) {
+        const unauthorized = failures.find((error) => error?.status === 401);
+        if (unauthorized) throw unauthorized;
+        const error = new Error(`${failures.length} área(s) não responderam. Os dados disponíveis foram mantidos.`);
+        error.partial = true;
+        throw error;
+      }
     } finally {
-      state.loading = false;
-      render();
+      if (!silent) {
+        state.sectionLoading = '';
+        render();
+      }
     }
   }
 
@@ -419,11 +534,13 @@
       const betaPayload = await api('/api/admin/beta-applications');
       state.betaApplications = betaPayload.data || [];
       state.betaSummary = betaPayload.summary || {};
+      state.betaTransitions = betaPayload.transitions || state.betaTransitions || null;
     }
-    if (section === 'workboard' && (force || !state.workCards)) {
+    if (['workboard', 'mywork'].includes(section) && (force || !state.workCards)) {
       const board = await api('/api/admin/work-board');
       state.workCards = board.cards || [];
       state.workMeta = board.meta || {};
+      state.betaTransitions = board.meta?.betaTransitions || state.betaTransitions || null;
     }
     if (section === 'logs' && (force || !state.logs)) {
       const filters = state.filters;
@@ -437,8 +554,46 @@
   }
 
   function authNotice() {
-    if (!state.notice) return '';
-    return `<div class='notice auth-notice ${escape(state.notice.type)}' role='status'><span>${state.notice.type === 'error' ? '!' : '✓'}</span>${escape(state.notice.text)}<button type='button' data-action='dismiss-notice' aria-label='Fechar'>×</button></div>`;
+    return `<div class='auth-notice-region' data-notice-region aria-live='polite' aria-atomic='true'>${noticeMarkup()}</div>`;
+  }
+
+  async function loadInitialData() {
+    let coreWarning = null;
+    try {
+      await loadCore();
+    } catch (error) {
+      if (error?.status === 401) throw error;
+      coreWarning = error;
+    }
+    const alreadyLoaded = new Set(['overview', 'subscriptions', 'tenants', 'support', 'plans', 'provision']);
+    if (alreadyLoaded.has(state.section)) {
+      if (coreWarning) showNotice(coreWarning.message || 'Parte dos dados gerais não respondeu.', 'error', false);
+      return;
+    }
+    state.sectionLoading = state.section;
+    state.sectionError = null;
+    render();
+    try {
+      await loadSection(state.section);
+      if (coreWarning) showNotice(coreWarning.message || 'Parte dos dados gerais não respondeu.', 'error', false);
+    } catch (error) {
+      state.sectionError = { section: state.section, message: error.message || 'A área não respondeu.' };
+      throw error;
+    } finally {
+      state.sectionLoading = '';
+      render();
+    }
+  }
+
+  async function finishAuthenticatedBoot() {
+    state.restoringSession = false;
+    if (!canOpenSection(state.section)) state.section = 'overview';
+    window.history.replaceState({ section: state.section }, '', `#/${ROUTE_PATHS[state.section] || ROUTE_PATHS.overview}`);
+    await loadInitialData();
+  }
+
+  function restoringView() {
+    return `<section class='login-shell' aria-busy='true'><div class='login-brand'><span class='brand-mark' aria-hidden='true'></span><div><strong>ChefOS</strong><small>Painel administrativo</small></div></div><div class='login-card restoring-card' role='status' aria-live='polite'><div class='loading'><i></i>Restaurando sua sessão segura…</div><p class='muted'>Estamos preparando suas permissões e os dados da operação.</p></div></section>`;
   }
 
   function loginView() {
@@ -470,16 +625,24 @@
   }
 
   function sidebar() {
-    const groups = navigation.map((group) => `<div class="nav-group"><span class="nav-label">${group.label}</span>${group.items.map(([key, label, glyph]) => {
+    const visibleGroups = navigation.map((group) => ({ ...group, items: group.items.filter(([key]) => canOpenSection(key)) })).filter((group) => group.items.length);
+    const groups = visibleGroups.map((group) => `<div class="nav-group"><span class="nav-label">${group.label}</span>${group.items.map(([key, label, glyph]) => {
       const badge = key === 'support' && (state.dashboard?.openTickets || 0) ? `<b>${state.dashboard.openTickets}</b>` : '';
-      return `<button class="nav-item ${state.section === key ? 'active' : ''}" data-action="section" data-section="${key}"><span class="nav-glyph" aria-hidden="true">${glyph}</span><span>${label}</span>${badge}</button>`;
+      return `<button class="nav-item ${state.section === key ? 'active' : ''}" data-action="section" data-section="${key}" ${state.section === key ? 'aria-current="page"' : ''}><span class="nav-glyph" aria-hidden="true">${glyph}</span><span>${label}</span>${badge}</button>`;
     }).join('')}</div>`).join('');
+    const healthState = state.health?.status || 'unknown';
+    const healthLabels = {
+      healthy: ['Sistema operacional', 'Serviços verificados'], attention: ['Sistema com atenção', 'Verifique os alertas'],
+      degraded: ['Operação degradada', 'Intervenção necessária'], critical: ['Incidente crítico', 'Intervenção imediata'],
+      unknown: ['Status não verificado', 'Abra Saúde do sistema']
+    };
+    const healthLabel = healthLabels[healthState] || healthLabels.unknown;
     return `<aside class="sidebar ${state.sidebarOpen ? 'open' : ''}" aria-label="Navegação principal">
       <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>ChefOS<small>Control Center</small></span><button class="icon-button sidebar-close" data-action="toggle-sidebar" aria-label="Fechar menu">×</button></div>
       <nav>${groups}</nav>
       <div class="sidebar-footer">
-        <div class="system-pill"><i></i><span><strong>Sistema operacional</strong><small>Todos os serviços ativos</small></span></div>
-        <div class="user-card"><span class="avatar">${initials(state.user?.email)}</span><span><strong>${escape(state.user?.email?.split('@')[0])}</strong><small>${escape(state.user?.email)}</small></span><button class="quiet" data-action="logout">Sair</button></div>
+        <div class="system-pill system-${escape(healthState)}"><i></i><span><strong>${healthLabel[0]}</strong><small>${healthLabel[1]}</small></span></div>
+        <div class="user-card"><span class="avatar">${initials(state.user?.email)}</span><span><strong>${escape(state.user?.email?.split('@')[0])}</strong><small>${escape(roleLabel(state.user?.role))} · ${escape(state.user?.email)}</small></span><button class="quiet" data-action="logout">Sair</button></div>
       </div>
     </aside>`;
   }
@@ -487,12 +650,12 @@
   function commandResults() {
     if (state.globalQuery.trim().length < 2) return '';
     const query = state.globalQuery.trim();
-    const sectionResults = Object.entries(sectionLabels).filter(([, label]) => includes(label, query)).slice(0, 4);
+    const sectionResults = Object.entries(sectionLabels).filter(([key, label]) => canOpenSection(key) && includes(label, query)).slice(0, 4);
     const tenantResults = state.tenants.filter((tenant) => includes(`${tenant.full_name} ${tenant.email} ${(tenant.stores || []).map((store) => store.name).join(' ')}`, query)).slice(0, 5);
     if (!sectionResults.length && !tenantResults.length) return `<div class="command-results"><p>Nenhum resultado para “${escape(query)}”.</p></div>`;
     return `<div class="command-results">
-      ${sectionResults.length ? `<small>NAVEGAÇÃO</small>${sectionResults.map(([key, label]) => `<button data-action="command-section" data-section="${key}"><span class="command-icon">↗</span><span><strong>${label}</strong><em>Abrir seção</em></span></button>`).join('')}` : ''}
-      ${tenantResults.length ? `<small>CLIENTES</small>${tenantResults.map((tenant) => `<button data-action="open-tenant" data-id="${tenant.id}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><em>${escape(tenant.email)}</em></span></button>`).join('')}` : ''}
+      ${sectionResults.length ? `<small>NAVEGAÇÃO</small>${sectionResults.map(([key, label]) => `<button role="option" data-command-option data-action="command-section" data-section="${key}"><span class="command-icon">↗</span><span><strong>${label}</strong><em>Abrir seção</em></span></button>`).join('')}` : ''}
+      ${tenantResults.length ? `<small>CLIENTES E LOJAS</small>${tenantResults.map((tenant) => { const matchingStore = (tenant.stores || []).find((store) => includes(store.name, query)); return `<button role="option" data-command-option data-action="open-tenant" data-id="${tenant.accountId || tenant.id}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><em>${escape(matchingStore ? `Loja: ${matchingStore.name}` : tenant.email)}</em></span></button>`; }).join('')}` : ''}
     </div>`;
   }
 
@@ -500,8 +663,8 @@
     return `<header class="topbar">
       <button class="icon-button menu-button" data-action="toggle-sidebar" aria-label="Abrir menu">☰</button>
       <div class="breadcrumbs"><span>ChefOS</span><b>/</b><strong>${sectionLabels[state.section]}</strong></div>
-      <div class="global-search"><span>⌕</span><input data-search="global" value="${escape(state.globalQuery)}" placeholder="Buscar cliente, loja ou seção..." aria-label="Busca global" /><kbd>Ctrl K</kbd>${commandResults()}</div>
-      <button class="top-action" data-action="open-provision"><span>＋</span>Novo cliente</button>
+      <div class="global-search" role="search"><span>⌕</span><input role="combobox" aria-autocomplete="list" aria-haspopup="listbox" data-search="global" value="${escape(state.globalQuery)}" placeholder="Buscar cliente, loja ou seção..." aria-label="Busca global" aria-controls="global-search-results" aria-expanded="${state.globalQuery.trim().length >= 2 ? 'true' : 'false'}" autocomplete="off" /><kbd>Ctrl K</kbd><div id="global-search-results" role="listbox" aria-label="Resultados da busca" data-command-region aria-live="polite" style="display:contents">${commandResults()}</div></div>
+      ${can('onboarding.manage') ? `<button class="top-action" data-action="open-provision"><span>＋</span>Novo cliente</button>` : ''}
     </header>`;
   }
 
@@ -532,7 +695,7 @@
     if (!alerts.length) alerts.push(`<div class="all-clear"><i>✓</i><span><strong>Operação sob controle</strong><small>Nenhuma pendência crítica identificada agora.</small></span></div>`);
 
     return `<section class="page overview-page">
-      ${pageHeader('PAINEL EXECUTIVO', `${greeting}, equipe ChefOS.`, `Pulso operacional atualizado ${relative(data.generatedAt)}.`, `<button class="secondary" data-action="refresh">↻ Atualizar dados</button><button class="primary" data-action="open-provision">＋ Novo cliente</button>`)}
+      ${pageHeader('PAINEL EXECUTIVO', `${greeting}, equipe ChefOS.`, `Pulso operacional atualizado ${relative(data.generatedAt)}.`, `<button class="secondary" data-action="refresh">↻ Atualizar dados</button>${can('onboarding.manage') ? `<button class="primary" data-action="open-provision">＋ Novo cliente</button>` : ''}`)}
       ${(data.dataQuality?.warnings || []).length ? `<div class="data-quality-banner"><span>i</span><div><strong>Receita contratada, ainda sem conciliação automática</strong><p>${escape(data.dataQuality.warnings[0])}</p></div><button data-action="section" data-section="subscriptions">Entender na base →</button></div>` : ''}
       <div class="metrics executive-metrics">
         ${metric('Receita mensal contratada', money(data.contractedMonthly), `${money((data.contractedMonthly || 0) * 12)} anualizado`, 'accent', 'R$')}
@@ -576,14 +739,14 @@
     const contractedMonthly = rows.filter(({ subscription }) => subscription.status === 'active' && subscription.entitlementActive).reduce((sum, { subscription }) => sum + Number(planById(subscription.plan_id)?.price || 0), 0);
     const dueSoon = rows.filter(({ subscription }) => { const diff = new Date(subscription.current_period_end).getTime() - Date.now(); return subscription.entitlementActive && diff >= 0 && diff <= 7 * 86400000; }).length;
     const expired = rows.filter(({ subscription }) => subscription.periodExpired && ['active', 'trialing'].includes(subscription.status)).length;
-    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">↓ Exportar CSV</button><button class="primary" data-action="open-provision">＋ Provisionar cliente</button>`;
+    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">↓ Exportar CSV</button>${can('onboarding.manage') ? `<button class="primary" data-action="open-provision">＋ Provisionar cliente</button>` : ''}`;
     return `<section class="page">
       ${pageHeader('RECEITA E ACESSO', 'Assinaturas', 'Controle planos, vencimentos e o acesso de cada operação ChefOS.', actions)}
       <div class="integration-warning"><span>!</span><div><strong>Alterações de acesso são internas</strong><p>O conector de recorrência do Mercado Pago ainda não está habilitado; mudanças aqui não cancelam nem alteram cobranças no provedor.</p></div></div>
       <div class="summary-strip"><div><span>Receita contratada nesta visão</span><strong>${money(contractedMonthly)}</strong></div><div><span>Assinaturas exibidas</span><strong>${rows.length}</strong></div><div><span>Vencem em 7 dias</span><strong>${dueSoon}</strong></div><div class="danger-text"><span>Ativas com período vencido</span><strong>${expired}</strong></div></div>
       <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="unpaid" ${filter === 'unpaid' ? 'selected' : ''}>Não pagas</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
       <div class="panel table-wrap"><table><thead><tr><th>Cliente / operação</th><th>Plano</th><th>Status</th><th>Saúde do acesso</th><th>Valor mensal</th><th>Período atual</th><th></th></tr></thead><tbody>
-        ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td>${entitlement(subscription)}</td><td><strong>${money(plan?.price)}</strong><small>valor do plano</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td><button class="row-action" data-action="edit-subscription" data-id="${accountId}">Gerenciar</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
+        ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td>${entitlement(subscription)}</td><td><strong>${money(plan?.price)}</strong><small>valor do plano</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td>${can('subscriptions.manage') ? `<button class="row-action" data-action="edit-subscription" data-id="${accountId}">Gerenciar</button>` : '<span class="read-only-label">Somente leitura</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
       </tbody></table></div>
     </section>`;
   }
@@ -592,7 +755,7 @@
     const query = state.filters.customer;
     const rows = state.tenants.filter((tenant) => !query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query));
     const summary = state.customerSummary || {};
-    const actions = `<button class="secondary" data-action="export" data-kind="customers">↓ Exportar CSV</button><button class="primary" data-action="open-provision">＋ Novo cliente</button>`;
+    const actions = `<button class="secondary" data-action="export" data-kind="customers">↓ Exportar CSV</button>${can('onboarding.manage') ? `<button class="primary" data-action="open-provision">＋ Novo cliente</button>` : ''}`;
     return `<section class="page">
       ${pageHeader('BASE DE CLIENTES', 'Clientes e operações', 'Visão 360º de identidade, onboarding, lojas, assinatura e suporte.', actions)}
       <div class="summary-strip customer-summary"><div><span>Clientes</span><strong>${summary.total ?? state.tenants.length}</strong></div><div><span>Operações</span><strong>${summary.stores || 0}</strong></div><div class="warning-text"><span>Onboarding incompleto</span><strong>${summary.incompleteOnboarding || 0}</strong></div><div class="danger-text"><span>Sem assinatura</span><strong>${summary.withoutSubscription || 0}</strong></div><div><span>Chamados abertos</span><strong>${summary.openTickets || 0}</strong></div></div>
@@ -604,19 +767,32 @@
     </section>`;
   }
 
-  function workLaneTarget(view, lane) {
+  function workLaneTarget(view, lane, currentStatus = '') {
     if (view === 'support') return lane;
-    if (view === 'beta') return { intake: 'new', contact: 'contact', selection: 'approved', onboarding: 'onboarding', active: 'active', done: 'completed' }[lane];
+    if (view === 'beta') {
+      const laneStatuses = {
+        intake: ['new', 'review'],
+        contact: ['contact', 'interview'],
+        selection: ['approved'],
+        onboarding: ['onboarding'],
+        active: ['active'],
+        done: ['completed', 'converted', 'closed']
+      }[lane] || [];
+      const allowed = new Set(betaAllowedStatuses(currentStatus));
+      return laneStatuses.find((status) => allowed.has(status)) || null;
+    }
     return null;
   }
 
-  function filteredWorkCards() {
+  function filteredWorkCards(mineOnly = false) {
     const query = state.filters.workQuery;
     const owner = state.filters.workOwner;
     return (state.workCards || []).filter((card) => {
       const matchesView = state.workView === 'radar' || card.source === state.workView;
       const matchesQuery = !query || includes(`${card.title} ${card.subtitle} ${card.detail} ${card.assignedTo || ''}`, query);
-      const matchesOwner = owner === 'all' || (owner === 'mine' ? normalize(card.assignedTo) === normalize(state.user?.email) : !card.assignedTo);
+      const matchesOwner = mineOnly
+        ? normalize(card.assignedTo) === normalize(state.user?.email)
+        : owner === 'all' || (owner === 'mine' ? normalize(card.assignedTo) === normalize(state.user?.email) : !card.assignedTo);
       return matchesView && matchesQuery && matchesOwner;
     });
   }
@@ -625,10 +801,11 @@
     const canMove = can(card.source === 'support' ? 'support.manage' : 'beta.manage');
     const reasons = (card.reasons || []).slice(0, 2);
     const dueClass = card.dueAt && new Date(card.dueAt) < new Date() ? 'overdue' : '';
-    return `<article class='work-card source-${escape(card.source)} ${card.completed ? 'completed' : ''}' draggable='${canMove ? 'true' : 'false'}' data-work-key='${escape(card.key)}'><header><span class='work-source'>${escape(WORK_SOURCE_LABELS[card.source])}</span><strong class='attention-score score-${card.attentionScore >= 80 ? 'critical' : card.attentionScore >= 50 ? 'high' : 'normal'}' title='Pontuação de atenção'>${card.attentionScore}</strong></header><button class='work-card-main' data-action='open-work-item' data-key='${escape(card.key)}'><h3>${escape(card.title)}</h3><p>${escape(card.subtitle)}</p><small>${escape(card.detail || 'Sem detalhe adicional')}</small></button><div class='work-card-signals'>${reasons.map((reason) => `<span>${escape(reason)}</span>`).join('') || `<span class='quiet-signal'>Acompanhamento em dia</span>`}</div><footer><span class='work-owner ${card.assignedTo ? '' : 'unassigned'}'>${card.assignedTo ? `◎ ${escape(card.assignedTo.split('@')[0])}` : '○ Sem responsável'}</span>${card.dueAt ? `<time class='${dueClass}'>${day(card.dueAt)}</time>` : `<time>Sem prazo</time>`}<button class='icon-button small-work-action' data-action='organize-work' data-key='${escape(card.key)}' aria-label='Organizar card'>•••</button></footer></article>`;
+    return `<article class='work-card source-${escape(card.source)} ${card.completed ? 'completed' : ''}' draggable='${canMove ? 'true' : 'false'}' data-work-key='${escape(card.key)}'><header><span class='work-source'>${escape(WORK_SOURCE_LABELS[card.source])}</span><strong class='attention-score score-${card.attentionScore >= 80 ? 'critical' : card.attentionScore >= 50 ? 'high' : 'normal'}' title='Pontuação de atenção'>${card.attentionScore}</strong></header><button class='work-card-main' data-action='open-work-item' data-key='${escape(card.key)}'><h3>${escape(card.title)}</h3><p>${escape(card.subtitle)}</p><small>${escape(card.detail || 'Sem detalhe adicional')}</small></button><div class='work-card-signals'>${reasons.map((reason) => `<span>${escape(reason)}</span>`).join('') || `<span class='quiet-signal'>Acompanhamento em dia</span>`}</div><footer><span class='work-owner ${card.assignedTo ? '' : 'unassigned'}'>${card.assignedTo ? `◎ ${escape(card.assignedTo.split('@')[0])}` : '○ Sem responsável'}</span>${card.dueAt ? `<time class='${dueClass}'>${day(card.dueAt)}</time>` : `<time>Sem prazo</time>`}${canMove ? `<button class='icon-button small-work-action' data-action='organize-work' data-key='${escape(card.key)}' aria-label='Organizar card'>•••</button>` : `<span class='read-only-label'>Somente leitura</span>`}</footer></article>`;
   }
 
   function workboard() {
+    const mineOnly = state.section === 'mywork';
     const meta = state.workMeta || { summary: {}, availableBoards: [] };
     const summary = meta.summary || {};
     const available = new Set(meta.availableBoards || []);
@@ -641,16 +818,16 @@
       support: [['open', 'Aberto', 'Aguardando atendimento'], ['in_progress', 'Em atendimento', 'Equipe trabalhando'], ['resolved', 'Resolvido', 'Solução entregue'], ['closed', 'Fechado', 'Atendimento encerrado']],
       beta: [['intake', 'Entrada', 'Novas e em análise'], ['contact', 'Contato', 'Contato e entrevista'], ['selection', 'Selecionados', 'Aprovados'], ['onboarding', 'Onboarding', 'Preparando a operação'], ['active', 'Acompanhamento', 'Beta em uso real'], ['done', 'Finalizados', 'Concluídos ou encerrados']]
     };
-    const cards = filteredWorkCards();
+    const cards = filteredWorkCards(mineOnly);
     const lanes = laneSets[state.workView];
     const laneOf = (card) => state.workView === 'radar' ? card.radarLane : card.nativeLane;
     const tabs = [['radar', 'Radar inteligente'], ...(available.has('support') ? [['support', 'Suporte']] : []), ...(available.has('beta') ? [['beta', 'Programa beta']] : [])];
-    return `<section class='page work-center'>${pageHeader('OPERAÇÃO UNIFICADA', 'Kanban operacional', 'Priorize o que exige atenção e trabalhe suporte e beta sem perder o contexto de cada módulo.', `<button class='secondary' data-action='reload-workboard'>↻ Atualizar quadro</button>`)}
+    return `<section class='page work-center'>${pageHeader(mineOnly ? 'TRABALHO PESSOAL' : 'OPERAÇÃO UNIFICADA', mineOnly ? 'Minha fila' : 'Kanban operacional', mineOnly ? 'Veja apenas os itens atribuídos a você, ordenados pelo que precisa de atenção primeiro.' : 'Priorize o que exige atenção e trabalhe suporte e beta sem perder o contexto de cada módulo.', `<button class='secondary' data-action='reload-workboard'>↻ Atualizar quadro</button>`)}
       <div class='summary-strip work-summary'>${[
         ['Itens ativos', summary.active || 0, 'nos dois fluxos'], ['Críticos agora', summary.critical || 0, 'exigem ação imediata'],
         ['Para hoje', summary.dueToday || 0, 'prioridades do dia'], ['Sem responsável', summary.unassigned || 0, 'precisam de atribuição']
       ].map(([label, value, helper]) => `<div><span>${label}</span><strong>${value}</strong><small>${helper}</small></div>`).join('')}</div>
-      <div class='work-controls'><div class='work-tabs'>${tabs.map(([key, label]) => `<button class='${state.workView === key ? 'active' : ''}' data-action='work-view' data-view='${key}'>${label}</button>`).join('')}</div><div class='work-filters'><div class='search-field'><span>⌕</span><input data-search='workQuery' value='${escape(state.filters.workQuery)}' placeholder='Buscar card, cliente ou responsável' /></div><select data-filter='workOwner' aria-label='Filtrar responsável'><option value='all'>Todos os responsáveis</option><option value='mine' ${state.filters.workOwner === 'mine' ? 'selected' : ''}>Minha fila</option><option value='unassigned' ${state.filters.workOwner === 'unassigned' ? 'selected' : ''}>Sem responsável</option></select></div></div>
+      <div class='work-controls'><div class='work-tabs' role='tablist' aria-label='Visão do quadro'>${tabs.map(([key, label]) => `<button role='tab' aria-selected='${state.workView === key}' class='${state.workView === key ? 'active' : ''}' data-action='work-view' data-view='${key}'>${label}</button>`).join('')}</div><div class='work-filters'><div class='search-field'><span>⌕</span><input data-search='workQuery' value='${escape(state.filters.workQuery)}' placeholder='Buscar card, cliente ou responsável' /></div>${mineOnly ? `<span class='result-count'>${cards.length} item(ns) atribuído(s) a você</span>` : `<select data-filter='workOwner' aria-label='Filtrar responsável'><option value='all'>Todos os responsáveis</option><option value='mine' ${state.filters.workOwner === 'mine' ? 'selected' : ''}>Minha fila</option><option value='unassigned' ${state.filters.workOwner === 'unassigned' ? 'selected' : ''}>Sem responsável</option></select>`}</div></div>
       <div class='work-intelligence'><i>✦</i><span><strong>Prioridade explicável</strong><small>A pontuação considera urgência, tempo sem movimentação, prazo, etapa e responsável. O ChefOS nunca muda um card sozinho.</small></span></div>
       <div class='kanban-board board-${state.workView}'>${lanes.map(([key, label, helper]) => { const laneCards = cards.filter((card) => laneOf(card) === key).sort((a, b) => state.workView === 'radar' ? b.attentionScore - a.attentionScore : a.position - b.position || b.attentionScore - a.attentionScore); return `<section class='kanban-lane' ${state.workView === 'radar' ? '' : `data-drop-lane='${key}'`}><header><span><h2>${label}</h2><small>${helper}</small></span><b>${laneCards.length}</b></header><div class='kanban-cards'>${laneCards.map(workCard).join('') || `<div class='kanban-empty'><i>✓</i><span>Nenhum item nesta coluna</span></div>`}</div></section>`; }).join('')}</div>
     </section>`;
@@ -671,7 +848,8 @@
   function support() {
     const tickets = filteredTickets();
     if (tickets.length && !tickets.some((ticket) => String(ticket.id) === String(state.selectedTicketId))) state.selectedTicketId = tickets[0].id;
-    const selected = (state.tickets || []).find((ticket) => String(ticket.id) === String(state.selectedTicketId));
+    if (!tickets.length) state.selectedTicketId = '';
+    const selected = tickets.find((ticket) => String(ticket.id) === String(state.selectedTicketId));
     const messages = selected?.messages || [];
     const summary = state.ticketSummary || {};
     return `<section class="page support-page">
@@ -679,13 +857,13 @@
       <div class="support-kpis"><div><span>FILA ATIVA</span><strong>${summary.active || 0}</strong><small>chamados para atender</small></div><div><span>PRIORIDADE ALTA</span><strong>${summary.priority || 0}</strong><small>altos e urgentes</small></div><div class="${summary.waitingOver24Hours ? 'danger-text' : ''}"><span>SLA &gt; 24H</span><strong>${summary.waitingOver24Hours || 0}</strong><small>sem atualização</small></div><div><span>TOTAL NA BASE</span><strong>${summary.total || 0}</strong><small>até ${state.ticketMeta?.limit || 250} mais recentes</small></div></div>
       <div class="support-workspace panel">
         <aside class="ticket-queue">
-          <div class="queue-head"><div><h2>Caixa de entrada</h2><span>${tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).length} pendente(s)</span></div><div class="search-field compact"><span>⌕</span><input data-search="ticket" value="${escape(state.filters.ticket)}" placeholder="Buscar chamado" /></div><div class="filter-tabs"><button class="${state.filters.ticketStatus === 'active' ? 'active' : ''}" data-action="ticket-filter" data-value="active">Ativos</button><button class="${state.filters.ticketStatus === 'open' ? 'active' : ''}" data-action="ticket-filter" data-value="open">Novos</button><button class="${state.filters.ticketStatus === 'completed' ? 'active' : ''}" data-action="ticket-filter" data-value="completed">Finalizados</button><button class="${state.filters.ticketStatus === 'all' ? 'active' : ''}" data-action="ticket-filter" data-value="all">Todos</button></div></div>
+          <div class="queue-head"><div><h2>Caixa de entrada</h2><span>${tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).length} pendente(s)</span></div><div class="search-field compact"><span>⌕</span><input data-search="ticket" value="${escape(state.filters.ticket)}" placeholder="Buscar chamado" /></div><div class="filter-tabs" role="tablist" aria-label="Status dos chamados">${[['active','Ativos'],['open','Novos'],['completed','Finalizados'],['all','Todos']].map(([key,label]) => `<button role="tab" aria-selected="${state.filters.ticketStatus === key}" class="${state.filters.ticketStatus === key ? 'active' : ''}" data-action="ticket-filter" data-value="${key}">${label}</button>`).join('')}</div></div>
           <div class="queue-list">${tickets.map((ticket) => `<button class="queue-item ${String(ticket.id) === String(state.selectedTicketId) ? 'active' : ''}" data-action="select-ticket" data-id="${ticket.id}"><div><span class="avatar small">${initials(ticket.client_name)}</span><strong>${escape(ticket.client_name)}</strong><time>${relative(ticket.updated_at || ticket.created_at)}</time></div><h3>${escape(ticket.subject || 'Sem assunto')}</h3><p>${escape(ticket.messages?.at(-1)?.text || ticket.store_name || 'Aguardando primeira mensagem')}</p><footer>${priority(ticket.priority)}${sla(ticket)}</footer></button>`).join('') || '<p class="empty">Nenhum chamado nesta fila.</p>'}</div>
         </aside>
-        <section class="conversation">${selected ? `<header class="conversation-head"><div><span class="avatar">${initials(selected.client_name)}</span><span><h2>${escape(selected.subject || 'Sem assunto')}</h2><p>${escape(selected.client_name)} · ${escape(selected.store_name || 'Geral')}</p></span></div><div>${priority(selected.priority)}${status(selected.status)}${!['resolved', 'closed'].includes(selected.status) ? `<button class="secondary small-button" data-action="resolve-ticket" data-id="${selected.id}">✓ Resolver</button>` : ''}</div></header>
+        <section class="conversation">${selected ? `<header class="conversation-head"><div><span class="avatar">${initials(selected.client_name)}</span><span><h2>${escape(selected.subject || 'Sem assunto')}</h2><p>${escape(selected.client_name)} · ${escape(selected.store_name || 'Geral')}</p></span></div><div>${priority(selected.priority)}${status(selected.status)}${can('support.manage') && !['resolved', 'closed'].includes(selected.status) ? `<button class="secondary small-button" data-action="resolve-ticket" data-id="${selected.id}">✓ Resolver</button>` : ''}</div></header>
           <div class="conversation-meta"><span><small>CRIADO</small><strong>${date(selected.created_at)}</strong></span><span><small>ÚLTIMA ATUALIZAÇÃO</small><strong>${relative(selected.updated_at || selected.created_at)}</strong></span><span><small>TEMPO NA FILA</small><strong>${sla(selected)}</strong></span><span><small>MENSAGENS</small><strong>${selected.messageCount ?? messages.length}</strong></span></div>
           <div class="messages">${messages.map((message) => `<article class="message ${message.sender_type === 'admin' ? 'mine' : ''}"><span class="message-avatar">${message.sender_type === 'admin' ? 'C' : initials(selected.client_name)}</span><div><header><strong>${message.sender_type === 'admin' ? 'Equipe ChefOS' : escape(selected.client_name)}</strong><time>${date(message.created_at)}</time></header><p>${escape(message.text)}</p></div></article>`).join('') || '<div class="empty-conversation"><i>✦</i><strong>Conversa ainda vazia</strong><small>Envie a primeira resposta para iniciar o atendimento.</small></div>'}</div>
-          <form data-form="reply" data-ticket="${selected.id}" class="composer"><textarea name="text" required maxlength="10000" placeholder="Escreva uma resposta para ${escape(selected.client_name)}..."></textarea><div class="composer-hint">Ctrl + Enter para enviar · a resposta fica registrada na auditoria</div><footer><label>Atualizar como <select name="status"><option value="in_progress">Em atendimento</option><option value="resolved">Resolvido</option><option value="open">Aberto</option></select></label><button class="primary" type="submit">Enviar resposta →</button></footer></form>` : '<div class="empty-conversation full"><i>✦</i><strong>Selecione um chamado</strong><small>A conversa completa aparecerá aqui.</small></div>'}</section>
+          ${can('support.manage') ? `<form data-form="reply" data-ticket="${selected.id}" class="composer"><textarea name="text" required maxlength="10000" placeholder="Escreva uma resposta para ${escape(selected.client_name)}..."></textarea><div class="composer-hint">Ctrl + Enter para enviar · a resposta fica registrada na auditoria</div><footer><label>Atualizar como <select name="status"><option value="in_progress">Em atendimento</option><option value="resolved">Resolvido</option><option value="open">Aberto</option></select></label><button class="primary" type="submit">Enviar resposta →</button></footer></form>` : `<div class="composer-hint">Você possui acesso somente para leitura deste atendimento.</div>`}` : '<div class="empty-conversation full"><i>✦</i><strong>Selecione um chamado</strong><small>A conversa completa aparecerá aqui.</small></div>'}</section>
       </div>
     </section>`;
   }
@@ -699,9 +877,9 @@
       const linkedSubscriptions = state.tenants.filter((tenant) => String(subscriptionOf(tenant)?.plan_id) === String(plan.id)).length;
       const permissions = (plan.plan_permissions || []).map((permission) => permission.permission_key);
       const billingState = !plan.recurring ? '<span class="billing-state neutral">Pagamento único</span>' : plan.preapproval_plan_id ? '<span class="billing-state ready">Mercado Pago conectado</span>' : '<span class="billing-state warning">Recorrência pendente</span>';
-      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${plan.recurring ? 'ASSINATURA' : 'ACESSO ÚNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descrição comercial.')}</p></span><button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button></header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${plan.recurring ? '/ mês' : ' pagamento único'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span><span><strong>${permissions.length}</strong><small>módulos</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(permissionLabel(key))}</span>`).join('') || '<span class="muted">Nenhum módulo incluído</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} módulos incluídos</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de teste</span><div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div></footer></article>`;
+      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${plan.recurring ? 'ASSINATURA' : 'ACESSO ÚNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descrição comercial.')}</p></span>${can('plans.manage') ? `<button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button>` : '<span class="read-only-label">Somente leitura</span>'}</header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${plan.recurring ? '/ mês' : ' pagamento único'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span><span><strong>${permissions.length}</strong><small>módulos</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(permissionLabel(key))}</span>`).join('') || '<span class="muted">Nenhum módulo incluído</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} módulos incluídos</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de teste</span>${can('plans.manage') ? `<div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div>` : ''}</footer></article>`;
     }).join('');
-    return `<section class="page">${pageHeader('ESTRATÉGIA COMERCIAL', 'Planos e módulos', 'Modele preço, recorrência, limites e acesso sem editar o banco manualmente.', `<button class="primary" data-action="open-plan">＋ Criar plano</button>`)}
+    return `<section class="page">${pageHeader('ESTRATÉGIA COMERCIAL', 'Planos e módulos', 'Modele preço, recorrência, limites e acesso sem editar o banco manualmente.', can('plans.manage') ? `<button class="primary" data-action="open-plan">＋ Criar plano</button>` : '')}
       ${integrationGaps ? `<div class="integration-warning"><span>!</span><div><strong>${integrationGaps} plano(s) recorrente(s) sem vínculo de cobrança</strong><p>Adicione o ID do plano de recorrência do Mercado Pago antes de comercializar esses planos.</p></div></div>` : ''}
       <div class="summary-strip"><div><span>Planos no catálogo</span><strong>${state.plans.length}</strong></div><div><span>Acessos ativos</span><strong>${activeSubscriptions.length}</strong></div><div><span>Receita contratada</span><strong>${money(contractedMonthly)}</strong></div><div class="${integrationGaps ? 'warning-text' : ''}"><span>Integrações pendentes</span><strong>${integrationGaps}</strong></div></div>
       <div class="plan-grid">${planCards || '<div class="panel empty">Nenhum plano cadastrado.</div>'}</div></section>`;
@@ -724,8 +902,8 @@
     const contextActions = `<div class="catalog-context"><label><span>CLIENTE</span><select data-action="select-tenant" aria-label="Selecionar cliente">${customerOptions}</select></label><label><span>OPERAÇÃO</span><select data-action="select-store" aria-label="Selecionar operação" ${storeOptions ? '' : 'disabled'}>${storeOptions || '<option>Sem loja cadastrada</option>'}</select></label></div>`;
     return `<section class="page">${pageHeader('OPERAÇÃO DO PRODUTO', 'Gestão de cardápios', 'Consulte e edite os itens da loja correta com todas as ações passando pela API.', contextActions)}
       <div class="summary-strip catalog-summary"><div><span>Cliente</span><strong>${escape(selected?.full_name || '—')}</strong></div><div><span>Itens</span><strong>${meta.total || 0}</strong></div><div><span>Disponíveis</span><strong>${meta.available || 0}</strong></div><div><span>Pausados</span><strong>${meta.paused || 0}</strong></div><div><span>Preço médio</span><strong>${money(meta.averagePrice)}</strong></div></div>
-      <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="catalog" value="${escape(query)}" placeholder="Buscar item, categoria ou código" /></div><select data-filter="catalogCategory" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option>${state.menuCategories.map((item) => `<option value="${item.id}" ${String(category) === String(item.id) ? 'selected' : ''}>${escape(item.name)}</option>`).join('')}</select><select data-filter="catalogStatus" aria-label="Filtrar disponibilidade"><option value="all" ${availability === 'all' ? 'selected' : ''}>Todos os itens</option><option value="available" ${availability === 'available' ? 'selected' : ''}>Disponíveis</option><option value="paused" ${availability === 'paused' ? 'selected' : ''}>Pausados</option></select><button class="primary" data-action="open-catalog-item" ${state.selectedStore ? '' : 'disabled'}>＋ Novo item</button><span class="result-count">${rows.length} resultado(s)</span></div>
-      <div class="panel table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Preparo</th><th>Disponibilidade</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.name)}</strong><small>${escape(item.description || item.external_code || `ID ${String(item.id).slice(0, 8)}`)}</small></td><td>${escape(item.categories?.name || 'Geral')}</td><td><strong>${money(item.price)}</strong></td><td><strong>${item.prep_time_in_minutes || 0} min</strong></td><td><span class="availability ${item.is_available ? 'on' : 'off'}"><i></i>${item.is_available ? 'Disponível' : 'Pausado'}</span></td><td><div class="row-actions"><button class="row-action" data-action="edit-catalog-item" data-id="${item.id}">Editar</button><button class="row-action" data-action="toggle-menu" data-id="${item.id}" data-available="${item.is_available}">${item.is_available ? 'Pausar' : 'Ativar'}</button></div></td></tr>`).join('') || `<tr><td colspan="6" class="empty">${state.selectedStore ? 'Nenhum item encontrado nesta operação.' : 'Selecione um cliente com loja para gerenciar o cardápio.'}</td></tr>`}</tbody></table></div>
+      <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="catalog" value="${escape(query)}" placeholder="Buscar item, categoria ou código" /></div><select data-filter="catalogCategory" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option>${state.menuCategories.map((item) => `<option value="${item.id}" ${String(category) === String(item.id) ? 'selected' : ''}>${escape(item.name)}</option>`).join('')}</select><select data-filter="catalogStatus" aria-label="Filtrar disponibilidade"><option value="all" ${availability === 'all' ? 'selected' : ''}>Todos os itens</option><option value="available" ${availability === 'available' ? 'selected' : ''}>Disponíveis</option><option value="paused" ${availability === 'paused' ? 'selected' : ''}>Pausados</option></select>${can('catalog.manage') ? `<button class="primary" data-action="open-catalog-item" ${state.selectedStore ? '' : 'disabled'}>＋ Novo item</button>` : ''}<span class="result-count">${rows.length} resultado(s)</span></div>
+      <div class="panel table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Preparo</th><th>Disponibilidade</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.name)}</strong><small>${escape(item.description || item.external_code || `ID ${String(item.id).slice(0, 8)}`)}</small></td><td>${escape(item.categories?.name || 'Geral')}</td><td><strong>${money(item.price)}</strong></td><td><strong>${item.prep_time_in_minutes || 0} min</strong></td><td><span class="availability ${item.is_available ? 'on' : 'off'}"><i></i>${item.is_available ? 'Disponível' : 'Pausado'}</span></td><td>${can('catalog.manage') ? `<div class="row-actions"><button class="row-action" data-action="edit-catalog-item" data-id="${item.id}">Editar</button><button class="row-action" data-action="toggle-menu" data-id="${item.id}" data-available="${item.is_available}">${item.is_available ? 'Pausar' : 'Ativar'}</button></div>` : '<span class="read-only-label">Somente leitura</span>'}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">${state.selectedStore ? 'Nenhum item encontrado nesta operação.' : 'Selecione um cliente com loja para gerenciar o cardápio.'}</td></tr>`}</tbody></table></div>
     </section>`;
   }
 
@@ -819,7 +997,7 @@
       ${state.adminMeta?.legacySchema ? `<div class='migration-banner critical'><i>!</i><span><strong>Proteção avançada ainda não aplicada no banco</strong><small>O painel está compatível, mas papéis, suspensão e bloqueio direto por RLS dependem da migração SQL.</small></span></div>` : ''}
       <div class='summary-strip access-summary'><div><span>Total da equipe</span><strong>${summary.total || 0}</strong></div><div><span>Ativos</span><strong class='success-text'>${summary.active || 0}</strong></div><div><span>Convites pendentes</span><strong>${summary.invited || 0}</strong></div><div><span>Suspensos</span><strong class='warning-text'>${summary.suspended || 0}</strong></div><div><span>Privilegiados sem MFA</span><strong class='danger-text'>${summary.withoutMfa || 0}</strong></div></div>
       <div class='access-workspace'><section class='panel access-team'><div class='panel-heading'><div><p class='eyebrow'>EQUIPE ADMINISTRATIVA</p><h2>Pessoas e permissões</h2></div><span class='count-badge'>${state.admins?.length || 0}</span></div><div class='access-table'>${(state.admins || []).map((admin) => `<article><span class='avatar'>${initials(admin.display_name || admin.email)}</span><div class='access-person'><strong>${escape(admin.display_name || admin.email.split('@')[0])}</strong><small>${escape(admin.email)}</small></div><div><small>FUNÇÃO</small><strong>${escape(roleLabel(admin.role))}</strong></div><div><small>STATUS</small><span class='access-status access-${escape(admin.status)}'><i></i>${escape(accessStatusLabel(admin.status))}</span></div><div><small>SEGURANÇA</small><span class='mfa-state ${admin.mfaEnabled ? 'enabled' : 'missing'}'>${admin.mfaEnabled ? '✓ MFA ativo' : admin.mfa_required ? '! MFA pendente' : 'MFA opcional'}</span></div><div><small>ÚLTIMA ATIVIDADE</small><strong>${relative(admin.last_sign_in_at || admin.last_seen_at)}</strong></div>${admin.protected ? `<span class='root-badge'>Raiz protegido</span>` : canManage && (admin.role !== 'owner' || state.adminMeta?.canManageOwners) ? `<button class='row-action' data-action='manage-admin' data-email='${escape(admin.email)}'>Gerenciar</button>` : `<span class='read-only-label'>Somente leitura</span>`}</article>`).join('') || `<p class='empty'>Nenhum administrador encontrado.</p>`}</div></section>
-        <form class='panel invite-card access-invite' data-form='admin'><span class='invite-icon'>＋</span><p class='eyebrow'>NOVO ACESSO</p><h2>Convidar para a equipe</h2><p class='muted'>O ChefOS enviará um convite real e registrará a concessão na auditoria.</p><label>Nome completo<input name='displayName' required maxlength='160' placeholder='Ex.: Ana Martins' /></label><label>E-mail corporativo<input name='email' type='email' required maxlength='254' placeholder='ana@chefos.online' /></label><label>Função<select name='role' required>${state.adminRoles.map((role) => `<option value='${escape(role.key)}'>${escape(role.label)} — ${escape(role.description)}</option>`).join('') || `<option value='support'>Suporte</option>`}</select></label><label>Motivo do acesso<textarea name='reason' required minlength='5' maxlength='500' placeholder='Ex.: nova responsável pelo atendimento'></textarea></label><label class='confirmation-check'><input type='checkbox' name='mfaRequired' checked /><span><strong>Exigir segundo fator</strong><small>Obrigatório para funções privilegiadas.</small></span></label><button class='primary' type='submit' ${canManage ? '' : 'disabled'}>Enviar convite seguro →</button></form></div>
+        ${canManage ? `<form class='panel invite-card access-invite' data-form='admin'><span class='invite-icon'>＋</span><p class='eyebrow'>NOVO ACESSO</p><h2>Convidar para a equipe</h2><p class='muted'>O ChefOS enviará um convite real e registrará a concessão na auditoria.</p><label>Nome completo<input name='displayName' required maxlength='160' placeholder='Ex.: Ana Martins' /></label><label>E-mail corporativo<input name='email' type='email' required maxlength='254' placeholder='ana@chefos.online' /></label><label>Função<select name='role' required>${state.adminRoles.map((role) => `<option value='${escape(role.key)}'>${escape(role.label)} — ${escape(role.description)}</option>`).join('') || `<option value='support'>Suporte</option>`}</select></label><label>Motivo do acesso<textarea name='reason' required minlength='5' maxlength='500' placeholder='Ex.: nova responsável pelo atendimento'></textarea></label><label class='confirmation-check'><input type='checkbox' name='mfaRequired' checked /><span><strong>Exigir segundo fator</strong><small>Obrigatório para funções privilegiadas.</small></span></label><button class='primary' type='submit'>Enviar convite seguro →</button></form>` : `<aside class='panel invite-card access-invite'><p class='eyebrow'>SOMENTE LEITURA</p><h2>Gestão protegida</h2><p class='muted'>Seu perfil pode consultar a equipe, mas apenas responsáveis autorizados podem conceder ou alterar acessos.</p></aside>`}</div>
     </section>`;
   }
 
@@ -855,8 +1033,8 @@
   }
 
   function activePage() {
-    const pages = { overview, workboard, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
-    return pages[state.section]();
+    const pages = { overview, mywork: workboard, workboard, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
+    return (pages[state.section] || overview)();
   }
 
   function subscriptionModal(tenant) {
@@ -870,7 +1048,7 @@
     const plan = planById(subscription.plan_id);
     const accountId = tenant.accountId || tenant.id;
     const missingLabels = { store: 'Criar loja principal', company_profile: 'Completar perfil da empresa', company_data: 'Completar dados fiscais da empresa', subscription: 'Configurar assinatura' };
-    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="drawer-title"><p class="eyebrow">VISÃO 360º DO CLIENTE</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p><div class="drawer-signals">${subscription ? status(subscription.status) : status('unknown')}${entitlement(subscription)}${onboarding(tenant)}</div></div><div class="detail-grid"><span><small>PLANO</small><strong>${escape(plan?.name || 'Sem plano')}</strong></span><span><small>VALOR CONTRATADO</small><strong>${money(plan?.price)}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>ÚLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span><span><small>CHAMADOS ABERTOS</small><strong>${tenant.support?.openTickets || 0}</strong></span><span><small>PRIORITÁRIOS</small><strong>${tenant.support?.urgentTickets || 0}</strong></span></div>${tenant.onboarding?.missing?.length ? `<section class="drawer-checklist"><div class="panel-heading"><h3>Próximas ações</h3><span class="count-badge">${tenant.onboarding.missing.length}</span></div>${tenant.onboarding.missing.map((item) => `<div><i>!</i><span><strong>${escape(missingLabels[item] || item)}</strong><small>Necessário para concluir o onboarding</small></span></div>`).join('')}</section>` : '<div class="drawer-all-clear"><i>✓</i><span><strong>Onboarding completo</strong><small>Estrutura mínima pronta para operar.</small></span></div>'}<section><div class="panel-heading"><h3>Operações</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>◫</span><span><strong>${escape(store.name)}</strong><small>ID ${escape(String(store.storeId || store.id).slice(0, 8))} · criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma operação vinculada.</p>'}</div></section><footer><button class="secondary" data-action="edit-subscription" data-id="${accountId}">Gerenciar assinatura</button><button class="primary" data-action="tenant-catalog" data-id="${accountId}">Ver cardápio</button></footer></aside></div>`;
+    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="drawer-title"><p class="eyebrow">VISÃO 360º DO CLIENTE</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p><div class="drawer-signals">${subscription ? status(subscription.status) : status('unknown')}${entitlement(subscription)}${onboarding(tenant)}</div></div><div class="detail-grid"><span><small>PLANO</small><strong>${escape(plan?.name || 'Sem plano')}</strong></span><span><small>VALOR CONTRATADO</small><strong>${money(plan?.price)}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>ÚLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span><span><small>CHAMADOS ABERTOS</small><strong>${tenant.support?.openTickets || 0}</strong></span><span><small>PRIORITÁRIOS</small><strong>${tenant.support?.urgentTickets || 0}</strong></span></div>${tenant.onboarding?.missing?.length ? `<section class="drawer-checklist"><div class="panel-heading"><h3>Próximas ações</h3><span class="count-badge">${tenant.onboarding.missing.length}</span></div>${tenant.onboarding.missing.map((item) => `<div><i>!</i><span><strong>${escape(missingLabels[item] || item)}</strong><small>Necessário para concluir o onboarding</small></span></div>`).join('')}</section>` : '<div class="drawer-all-clear"><i>✓</i><span><strong>Onboarding completo</strong><small>Estrutura mínima pronta para operar.</small></span></div>'}<section><div class="panel-heading"><h3>Operações</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>◫</span><span><strong>${escape(store.name)}</strong><small>ID ${escape(String(store.storeId || store.id).slice(0, 8))} · criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma operação vinculada.</p>'}</div></section><footer>${can('subscriptions.manage') ? `<button class="secondary" data-action="edit-subscription" data-id="${accountId}">Gerenciar assinatura</button>` : ''}${can('catalog.read') ? `<button class="primary" data-action="tenant-catalog" data-id="${accountId}">Ver cardápio</button>` : ''}</footer></aside></div>`;
   }
 
   function planModal() {
@@ -904,7 +1082,7 @@
     const auth = result.auth || {};
     const tenant = result.tenant || {};
     const plan = planById(tenant.planId);
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><section class="modal-card onboarding-success"><header><div><p class="eyebrow">ATIVAÇÃO CONCLUÍDA</p><h2 id="modal-title">Cliente pronto para entrar</h2><p>${auth.userCreated ? 'A conta e a estrutura ChefOS foram criadas.' : 'A conta existente foi reutilizada e a estrutura foi validada.'}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><div class="success-mark">✓</div><div class="credential-list"><div><span><small>E-MAIL DE ACESSO</small><strong>${escape(auth.email || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="email">Copiar</button></div>${auth.userCreated ? `<div><span><small>SENHA INICIAL</small><strong>${escape(state.modal.password || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="password">Copiar</button></div>` : '<div class="credential-note"><i>i</i><span><strong>Senha preservada</strong><small>O e-mail já existia; a senha informada não foi aplicada.</small></span></div>'}<div><span><small>OPERAÇÃO</small><strong>${escape(tenant.storeName || '')}</strong></span></div><div><span><small>PLANO INICIAL</small><strong>${escape(plan?.name || 'Plano configurado')}</strong></span></div><div><span><small>CHAVE DE INTEGRAÇÃO</small><strong class="technical-value">${escape(tenant.apiKey || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="apiKey">Copiar</button></div></div><div class="security-reminder"><strong>Entregue as credenciais por um canal seguro</strong><p>A senha inicial só permanece nesta tela enquanto o modal estiver aberto.</p></div></div><footer><button class="secondary" data-action="close-modal">Fechar</button><button class="primary" data-action="view-provisioned-customer" data-id="${tenant.accountId || ''}">Abrir visão do cliente</button></footer></section></div>`;
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><section class="modal-card onboarding-success"><header><div><p class="eyebrow">ATIVAÇÃO CONCLUÍDA</p><h2 id="modal-title">Cliente pronto para entrar</h2><p>${auth.userCreated ? 'A conta e a estrutura ChefOS foram criadas.' : 'A conta existente foi reutilizada e a estrutura foi validada.'}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><div class="success-mark">✓</div><div class="credential-list"><div><span><small>E-MAIL DE ACESSO</small><strong>${escape(auth.email || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="email">Copiar</button></div>${auth.userCreated ? `<div><span><small>SENHA INICIAL</small><strong>${escape(state.modal.password || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="password">Copiar</button></div>` : '<div class="credential-note"><i>i</i><span><strong>Senha preservada</strong><small>O e-mail já existia; a senha informada não foi aplicada.</small></span></div>'}<div><span><small>OPERAÇÃO</small><strong>${escape(tenant.storeName || '')}</strong></span></div><div><span><small>PLANO INICIAL</small><strong>${escape(plan?.name || 'Plano configurado')}</strong></span></div><div><span><small>CHAVE DE INTEGRAÇÃO</small><strong class="technical-value">${escape(tenant.apiKey || '')}</strong></span><button class="row-action" data-action="copy-onboarding" data-copy="apiKey">Copiar</button></div></div><div class="security-reminder"><strong>Entregue as credenciais por um canal seguro</strong><p>A senha inicial só permanece nesta tela enquanto o modal estiver aberto.</p></div><label class="confirmation-check credential-ack"><input type="checkbox" data-credential-ack ${state.modal.credentialsAcknowledged ? 'checked' : ''} /><span><strong>Guardei as credenciais necessárias</strong><small>Confirme antes de sair desta tela para evitar a perda da senha inicial.</small></span></label></div><footer><button class="secondary" data-action="close-modal">Fechar</button><button class="primary" data-action="view-provisioned-customer" data-id="${tenant.accountId || ''}">Abrir visão do cliente</button></footer></section></div>`;
   }
 
   function adminAccessModal() {
@@ -923,10 +1101,13 @@
   function workItemModal() {
     const card = (state.workCards || []).find((item) => item.key === state.modal?.key);
     if (!card) return '';
+    const canManage = can(card.source === 'support' ? 'support.manage' : 'beta.manage');
+    if (!canManage) return '';
     const statuses = card.source === 'support'
       ? ['open', 'in_progress', 'resolved', 'closed']
-      : BETA_STAGES;
-    const selectedStatus = state.modal?.targetStatus || card.status;
+      : betaAllowedStatuses(card.status);
+    const requestedStatus = state.modal?.targetStatus || card.status;
+    const selectedStatus = statuses.includes(requestedStatus) ? requestedStatus : card.status;
     return `<div class='modal-shell' role='dialog' aria-modal='true' aria-labelledby='work-item-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><form class='modal-card work-item-modal' data-form='work-item'><header><div><p class='eyebrow'>${escape(WORK_SOURCE_LABELS[card.source])}</p><h2 id='work-item-title'>Organizar card</h2><p>${escape(card.title)} · prioridade ${card.attentionScore}</p></div><button type='button' class='icon-button' data-action='close-modal' aria-label='Fechar'>×</button></header><div class='modal-body'><input type='hidden' name='key' value='${escape(card.key)}' /><div class='work-modal-score'><strong>${card.attentionScore}</strong><span><b>Índice de atenção</b><small>${escape((card.reasons || []).join(' · ') || 'Acompanhamento em dia')}</small></span></div><label>Etapa<select name='status' required>${statuses.map((key) => `<option value='${key}' ${selectedStatus === key ? 'selected' : ''}>${escape(workStatusLabel(card.source, key))}</option>`).join('')}</select></label><label>Responsável interno<input name='assignedTo' type='email' maxlength='254' value='${escape(card.assignedTo || '')}' placeholder='administrador@chefos.online' /></label><label>Prazo para próxima ação<input name='dueAt' type='datetime-local' value='${escape(toInputDateTime(card.dueAt))}' /></label><label>Registro da movimentação<textarea name='note' maxlength='1000' placeholder='Contexto da decisão ou próximo passo${card.source === 'beta' ? ' — obrigatório ao mudar a etapa' : ''}'></textarea></label>${card.source === 'beta' ? `<div class='modal-alert'><strong>Histórico do programa</strong><p>Mudar a etapa do beta exige uma observação e registra o responsável pela decisão.</p></div>` : `<div class='secure-note'><span>✓</span><p><strong>Movimentação auditada</strong><small>A alteração de etapa, responsável e prazo ficará no histórico administrativo.</small></p></div>`}</div><footer><button type='button' class='secondary' data-action='close-modal'>Cancelar</button><button class='primary' type='submit'>Salvar no quadro</button></footer></form></div>`;
   }
 
@@ -936,21 +1117,23 @@
     const participant = application.participant || null;
     const events = [...(application.events || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const whatsapp = whatsappUrl(application.phone);
-    const canConvert = !participant && ['approved', 'onboarding'].includes(application.status);
+    const canManageBeta = can('beta.manage');
+    const canConvert = canManageBeta && !participant && ['approved', 'onboarding'].includes(application.status);
+    const allowedStatuses = betaAllowedStatuses(application.status);
     return `<div class='modal-shell drawer-shell' role='dialog' aria-modal='true' aria-labelledby='beta-application-title'><button class='modal-backdrop' data-action='close-modal' aria-label='Fechar'></button><form class='detail-drawer beta-drawer' data-form='beta-application'><header><div><p class='eyebrow'>FICHA DO CANDIDATO</p><h2 id='beta-application-title'>${escape(application.restaurant_name)}</h2></div><button type='button' class='icon-button' data-action='close-modal' aria-label='Fechar'>×</button></header><input type='hidden' name='id' value='${escape(application.id)}' /><div class='drawer-title'><p>${escape(application.name)} · candidatura ${relative(application.submitted_at)}</p><div class='drawer-signals'>${betaStageSignal(application.status)}${betaNeedsAttention(application) ? `<span class='health-signal warning'><i></i>Precisa de atenção</span>` : `<span class='health-signal success'><i></i>Acompanhamento em dia</span>`}</div></div>
       <div class='beta-contact-actions'><a class='secondary' href='mailto:${encodeURIComponent(application.email)}'>Enviar e-mail</a>${whatsapp ? `<a class='secondary' href='${escape(whatsapp)}' target='_blank' rel='noopener'>Abrir WhatsApp</a>` : ''}</div>
       <section class='detail-grid beta-detail-grid'><span><small>RESPONSÁVEL</small><strong>${escape(application.name)}</strong></span><span><small>E-MAIL</small><strong>${escape(application.email)}</strong></span><span><small>TELEFONE</small><strong>${escape(application.phone || 'Não informado')}</strong></span><span><small>PERFIL</small><strong>${escape(application.establishment_type || application.restaurant_size || 'Não informado')}</strong></span><span><small>ORIGEM</small><strong>${escape(application.source || 'landing')}</strong></span><span><small>RESPONSÁVEL INTERNO</small><strong>${escape(application.assigned_to || 'Ainda não atribuído')}</strong></span></section>
       <section class='beta-consent'><div><i>✓</i><span><strong>Participação no programa</strong><small>Termo ${escape(application.consent_version || 'registrado')} aceito na candidatura.</small></span></div><div class='${application.consent_marketing ? 'granted' : 'optional'}'><i>${application.consent_marketing ? '✓' : '—'}</i><span><strong>Comunicações de marketing</strong><small>${application.consent_marketing ? 'Autorizadas pelo candidato.' : 'Não autorizadas; envie somente mensagens necessárias ao beta.'}</small></span></div></section>
       ${participant ? `<section class='beta-participant-card'><div class='panel-heading'><div><p class='eyebrow'>PARTICIPANTE</p><h3>Ciclo do beta</h3></div>${betaParticipantStatusSignal(participant.status)}</div><div class='detail-grid'><span><small>COORTE</small><strong>${escape(participant.cohort || 'founders-2026')}</strong></span><span><small>ATIVAÇÃO</small><strong>${participant.activated_at ? day(participant.activated_at) : 'Pendente'}</strong></span><span><small>ENCERRAMENTO</small><strong>${participant.beta_ends_at ? day(participant.beta_ends_at) : '90 dias após ativar'}</strong></span><span><small>SAÚDE</small><strong>${betaParticipantHealthSignal(participant)}</strong></span></div></section>` : ''}
-      <section class='beta-operation-form'><div class='panel-heading'><div><p class='eyebrow'>PRÓXIMA MOVIMENTAÇÃO</p><h3>Registrar acompanhamento</h3><p class='muted'>Toda mudança fica vinculada ao administrador responsável.</p></div></div><label>Etapa<select name='status' required>${BETA_STAGES.map((key) => `<option value='${key}' ${application.status === key ? 'selected' : ''}>${BETA_STAGE_LABELS[key]}</option>`).join('')}</select></label><label>Coorte<input name='cohort' maxlength='80' value='${escape(participant?.cohort || 'founders-2026')}' placeholder='founders-2026' /></label><label>Registro da conversa ou decisão<textarea name='note' required minlength='3' maxlength='1000' placeholder='Ex.: falei com o responsável; entrevista marcada para sexta-feira.'></textarea></label><div class='modal-alert'><strong>Quando começa o período gratuito?</strong><p>Os 90 dias começam somente ao mover um participante para “Beta ativo”. Até lá ele permanece em onboarding.</p></div></section>
+      ${canManageBeta ? `<section class='beta-operation-form'><div class='panel-heading'><div><p class='eyebrow'>PRÓXIMA MOVIMENTAÇÃO</p><h3>Registrar acompanhamento</h3><p class='muted'>Toda mudança fica vinculada ao administrador responsável.</p></div></div><label>Etapa<select name='status' required>${allowedStatuses.map((key) => `<option value='${key}' ${application.status === key ? 'selected' : ''}>${BETA_STAGE_LABELS[key]}</option>`).join('')}</select></label><label>Coorte<input name='cohort' maxlength='80' value='${escape(participant?.cohort || 'founders-2026')}' placeholder='founders-2026' /></label><label>Registro da conversa ou decisão<textarea name='note' required minlength='3' maxlength='1000' placeholder='Ex.: falei com o responsável; entrevista marcada para sexta-feira.'></textarea></label><div class='modal-alert'><strong>Quando começa o período gratuito?</strong><p>Os 90 dias começam somente ao mover um participante para “Beta ativo”. Até lá ele permanece em onboarding.</p></div></section>` : `<div class='secure-note'><span>i</span><p><strong>Acesso somente para leitura</strong><small>Seu perfil pode consultar a candidatura e o histórico, mas não alterar a etapa.</small></p></div>`}
       <section class='beta-timeline'><div class='panel-heading'><div><p class='eyebrow'>HISTÓRICO</p><h3>Movimentações da candidatura</h3></div><span class='count-badge'>${events.length}</span></div>${events.map((entry) => `<article><i></i><div><strong>${entry.event_type === 'participant_created' ? 'Participante criado' : entry.event_type === 'note_added' ? 'Acompanhamento registrado' : entry.to_status ? `${BETA_STAGE_LABELS[entry.from_status] || 'Entrada'} → ${BETA_STAGE_LABELS[entry.to_status] || entry.to_status}` : 'Candidatura recebida'}</strong><p>${escape(entry.note || 'Sem observação adicional.')}</p><small>${date(entry.created_at)} · ${escape(entry.actor_email || 'sistema')}</small></div></article>`).join('') || `<p class='empty'>Nenhuma movimentação registrada.</p>`}</section>
-      <footer>${canConvert ? `<button type='button' class='secondary' data-action='convert-beta' data-id='${escape(application.id)}'>Criar participante</button>` : `<button type='button' class='secondary' data-action='close-modal'>Fechar</button>`}<button class='primary' type='submit'>Salvar acompanhamento</button></footer></form></div>`;
+      <footer>${canConvert ? `<button type='button' class='secondary' data-action='convert-beta' data-id='${escape(application.id)}'>Criar participante</button>` : `<button type='button' class='secondary' data-action='close-modal'>Fechar</button>`}${canManageBeta ? `<button class='primary' type='submit'>Salvar acompanhamento</button>` : ''}</footer></form></div>`;
   }
 
   function modalView() {
     if (!state.modal) return '';
-    if (state.modal.type === 'subscription') return subscriptionModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
-    if (state.modal.type === 'tenant') return tenantModal(state.tenants.find((tenant) => String(tenant.id) === String(state.modal.id)));
+    if (state.modal.type === 'subscription') return subscriptionModal(state.tenants.find((tenant) => String(tenant.accountId || tenant.id) === String(state.modal.id)));
+    if (state.modal.type === 'tenant') return tenantModal(state.tenants.find((tenant) => String(tenant.accountId || tenant.id) === String(state.modal.id)));
     if (state.modal.type === 'plan') return planModal();
     if (state.modal.type === 'catalog-item') return catalogItemModal();
     if (state.modal.type === 'onboarding-success') return onboardingSuccessModal();
@@ -961,31 +1144,133 @@
     return '';
   }
 
+  function sectionContent() {
+    if (state.sectionLoading === state.section) {
+      return `<section class='page panel loading-page' role='status' aria-live='polite' aria-busy='true'><div class='loading'><i></i>Carregando ${escape(sectionLabels[state.section] || 'esta área')}…</div><p class='muted'>Os dados anteriores permanecem seguros enquanto a atualização é concluída.</p></section>`;
+    }
+    if (state.sectionError?.section === state.section) {
+      return `<section class='page panel error-page' role='alert'><p class='eyebrow'>NÃO FOI POSSÍVEL CARREGAR</p><h1>${escape(sectionLabels[state.section] || 'Esta área')}</h1><p class='muted'>${escape(state.sectionError.message || 'A área não respondeu. Tente novamente.')}</p><button class='primary' data-action='retry-section'>Tentar novamente</button></section>`;
+    }
+    return activePage();
+  }
+
+  function modalReturnSelector(target) {
+    if (!target) return null;
+    const attributes = ['action', 'id', 'key', 'email'].filter((key) => target.dataset?.[key]).map((key) => `[data-${key}="${CSS.escape(target.dataset[key])}"]`).join('');
+    return attributes || null;
+  }
+
+  function openModal(modal, target = document.activeElement) {
+    state.modalReturn = modalReturnSelector(target);
+    state.modalDirty = false;
+    state.modal = modal;
+    render();
+  }
+
+  function focusModal() {
+    const dialog = document.querySelector('.modal-shell[role="dialog"]');
+    if (!dialog) return;
+    document.querySelectorAll('.sidebar, .workspace').forEach((element) => {
+      element.inert = true;
+      element.setAttribute('aria-hidden', 'true');
+    });
+    const focusable = dialog.querySelector('[autofocus], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not(.modal-backdrop):not([disabled]), a[href]');
+    window.requestAnimationFrame(() => focusable?.focus());
+  }
+
+  function confirmCredentialExit() {
+    if (state.modal?.type !== 'onboarding-success' || !state.modal?.password || state.modal?.credentialsAcknowledged) return true;
+    return window.confirm('A senha inicial não poderá ser exibida novamente. Fechar sem confirmar que as credenciais foram guardadas?');
+  }
+
+  function closeModal({ force = false } = {}) {
+    if (!state.modal) return true;
+    if (!force && !confirmCredentialExit()) return false;
+    if (!force && state.modalDirty && !window.confirm('Descartar as alterações não salvas?')) return false;
+    const returnSelector = state.modalReturn;
+    state.modal = null;
+    state.modalDirty = false;
+    state.modalReturn = null;
+    render();
+    if (returnSelector) window.requestAnimationFrame(() => document.querySelector(returnSelector)?.focus());
+    return true;
+  }
+
   function shell() {
-    return `<div class="app-shell">${sidebar()}<div class="workspace">${topbar()}<main class="content">${state.notice ? `<div class="notice ${state.notice.type}" role="status"><span>${state.notice.type === 'error' ? '!' : '✓'}</span>${escape(state.notice.text)}<button data-action="dismiss-notice" aria-label="Fechar">×</button></div>` : ''}${state.loading ? '<div class="loading"><i></i>Atualizando operação...</div>' : ''}${activePage()}</main></div>${state.sidebarOpen ? '<button class="sidebar-backdrop" data-action="toggle-sidebar" aria-label="Fechar menu"></button>' : ''}${modalView()}</div>`;
+    return `<div class="app-shell">${sidebar()}<div class="workspace">${topbar()}<main class="content" aria-busy="${state.sectionLoading === state.section}"><div data-notice-region aria-live="polite" aria-atomic="true">${noticeMarkup()}</div><div data-page-region style="display:contents">${sectionContent()}</div></main></div>${state.sidebarOpen ? '<button class="sidebar-backdrop" data-action="toggle-sidebar" aria-label="Fechar menu"></button>' : ''}${modalView()}</div>`;
   }
 
   function render(focusKey = '') {
     if (!configured()) { app.innerHTML = missingConfigView(); return; }
-    app.innerHTML = state.inviteMode ? inviteView() : state.mfaMode ? mfaView() : state.user ? shell() : loginView();
+    app.innerHTML = state.inviteMode ? inviteView() : state.mfaMode ? mfaView() : state.restoringSession ? restoringView() : state.user ? shell() : loginView();
+    document.title = state.user ? `ChefOS — ${sectionLabels[state.section] || 'Painel administrativo'}` : 'ChefOS — Painel administrativo';
     if (focusKey) {
       const input = document.querySelector(`[data-search="${focusKey}"]`);
       if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
     }
     document.body.classList.toggle('modal-open', Boolean(state.modal));
+    if (state.modal) focusModal();
+  }
+
+  function renderPage(focusKey = '') {
+    const region = document.querySelector('[data-page-region]');
+    if (!region) { render(focusKey); return; }
+    region.innerHTML = sectionContent();
+    document.title = `ChefOS — ${sectionLabels[state.section] || 'Painel administrativo'}`;
+    if (focusKey) {
+      const input = document.querySelector(`[data-search="${focusKey}"]`);
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }
   }
 
   async function safe(action) {
-    try { await action(); } catch (error) { state.loading = false; showNotice(error.message || 'Ocorreu um erro.', 'error'); }
+    try { await action(); } catch (error) {
+      state.loading = false;
+      state.sectionLoading = '';
+      if (error?.status === 401 && state.user) {
+        await signOut();
+        showNotice('Sua sessão expirou. Entre novamente.', 'error');
+        return;
+      }
+      showNotice(error.message || 'Ocorreu um erro.', 'error', false);
+    }
   }
 
-  function openSection(section) {
+  async function openSection(section, { history = 'push', scroll = true } = {}) {
+    if (!canOpenSection(section)) {
+      showNotice('Seu perfil não possui acesso a esta área.', 'error', false);
+      return;
+    }
+    if (state.modal && !closeModal()) {
+      if (history === 'none') window.history.replaceState({ section: state.section }, '', `#/${ROUTE_PATHS[state.section] || ROUTE_PATHS.overview}`);
+      return;
+    }
+    if (state.pageDirty && !window.confirm('Descartar as alterações não salvas desta página?')) {
+      if (history === 'none') window.history.replaceState({ section: state.section }, '', `#/${ROUTE_PATHS[state.section] || ROUTE_PATHS.overview}`);
+      return;
+    }
+    const navigationId = ++state.navigationSequence;
+    state.pageDirty = false;
     state.section = section;
     state.sidebarOpen = false;
     state.globalQuery = '';
-    state.loading = true;
+    state.sectionError = null;
+    state.sectionLoading = section;
+    const route = `#/${ROUTE_PATHS[section] || ROUTE_PATHS.overview}`;
+    if (history === 'push' && window.location.hash !== route) window.history.pushState({ section }, '', route);
+    if (history === 'replace') window.history.replaceState({ section }, '', route);
     render();
-    return loadSection(section).finally(() => { state.loading = false; render(); });
+    if (scroll) window.scrollTo({ top: 0, behavior: 'auto' });
+    try {
+      await loadSection(section);
+    } catch (error) {
+      if (navigationId === state.navigationSequence && state.section === section) state.sectionError = { section, message: error.message || 'A área não respondeu.' };
+    } finally {
+      if (navigationId === state.navigationSequence && state.section === section) {
+        state.sectionLoading = '';
+        render();
+      }
+    }
   }
 
   function downloadCsv(kind) {
@@ -1038,20 +1323,22 @@
     const form = event.target.closest('form');
     if (!form) return;
     event.preventDefault();
+    if (state.pendingAction) return;
     const values = Object.fromEntries(new FormData(form));
+    const pendingKey = `form:${form.dataset.form || 'unknown'}`;
+    state.pendingAction = pendingKey;
+    setPendingElement(form, true);
+    try {
     if (form.dataset.form === 'login') {
-      state.loading = true; render();
       const ready = await signIn(values.email, values.password);
-      if (ready) await loadCore();
+      if (ready) await finishAuthenticatedBoot();
       return;
     }
     if (form.dataset.form === 'invite-password') {
-      state.loading = true; render();
       await finishInvitation(values.password, values.confirmation);
       return;
     }
     if (form.dataset.form === 'mfa') {
-      state.loading = true; render();
       await verifyMfa(values.code);
       return;
     }
@@ -1059,6 +1346,7 @@
       const currentPeriodEnd = values.currentPeriodEnd ? new Date(`${values.currentPeriodEnd}T23:59:59`).toISOString() : undefined;
       const result = await api('/api/admin/subscriptions', { method: 'POST', body: { accountId: values.accountId, status: values.status, planId: values.planId, currentPeriodEnd, reason: values.reason } });
       state.modal = null;
+      state.modalDirty = false;
       await loadCore();
       showNotice(result.warning || 'Assinatura atualizada e registrada na auditoria.');
       return;
@@ -1067,10 +1355,16 @@
       const editing = Boolean(values.id);
       const permissions = [...new Set(new FormData(form).getAll('permissions').map((key) => String(key)).filter(Boolean))];
       await api('/api/admin/plans', { method: editing ? 'PUT' : 'POST', body: { id: values.id || undefined, plan: { name: values.name, slug: values.slug, description: values.description, price: Number(values.price), trial_period_days: Number(values.trial), max_stores: Number(values.stores), recurring: values.recurring === 'on', isMostPopular: values.popular === 'on', preapproval_plan_id: values.preapprovalPlanId, mp_reason: values.mpReason }, permissions } });
-      const plans = await api('/api/admin/plans');
-      state.plans = plans.data || [];
-      state.permissionCatalog = plans.permissionCatalog || state.permissionCatalog;
       state.modal = null;
+      state.modalDirty = false;
+      try {
+        const plans = await api('/api/admin/plans');
+        state.plans = plans.data || [];
+        state.permissionCatalog = plans.permissionCatalog || state.permissionCatalog;
+      } catch {
+        showNotice(`${editing ? 'Plano atualizado' : 'Plano criado'}. Atualize a lista para carregar os dados mais recentes.`, 'warning', false);
+        return;
+      }
       showNotice(editing ? 'Plano atualizado com sucesso.' : 'Plano criado com sucesso.');
       return;
     }
@@ -1078,37 +1372,51 @@
       const item = { name: values.name, category: values.category, price: Number(values.price), prep_time_in_minutes: Number(values.prepTime), description: values.description, external_code: values.externalCode, is_available: values.available === 'on' };
       await api('/api/admin/tenant-menu', { method: values.id ? 'PUT' : 'POST', body: { storeId: state.selectedStore, id: values.id || undefined, item } });
       state.modal = null;
+      state.modalDirty = false;
       await loadSection('catalog');
       showNotice(values.id ? 'Item atualizado no cardápio.' : 'Item adicionado ao cardápio.');
       return;
     }
     if (form.dataset.form === 'reply') {
       await api('/api/admin/messages', { method: 'POST', body: { ticket_id: form.dataset.ticket, text: values.text, status_update: values.status } });
-      const tickets = await api('/api/admin/tickets');
-      state.tickets = tickets.data || [];
-      state.ticketSummary = tickets.summary || null;
-      state.ticketMeta = tickets.meta || null;
+      form.reset();
+      try {
+        const tickets = await api('/api/admin/tickets');
+        state.tickets = tickets.data || [];
+        state.ticketSummary = tickets.summary || null;
+        state.ticketMeta = tickets.meta || null;
+      } catch {
+        showNotice('Resposta enviada. Atualize o atendimento para carregar a conversa mais recente.', 'warning', false);
+        return;
+      }
       showNotice('Resposta enviada ao cliente.');
       return;
     }
     if (form.dataset.form === 'provision') {
-      state.loading = true; render();
       const result = await api('/api/admin/provision-tenant', { method: 'POST', body: values });
-      await loadCore();
-      state.modal = { type: 'onboarding-success', data: result, password: values.initialPassword };
+      try {
+        await loadCore({ silent: true });
+      } catch {
+        state.notice = { text: 'Cliente criado. Atualize o painel para recarregar os indicadores gerais.', type: 'warning' };
+      }
+      state.modalDirty = false;
+      state.pageDirty = false;
+      state.modal = { type: 'onboarding-success', data: result, password: values.initialPassword, credentialsAcknowledged: false };
       render();
       return;
     }
     if (form.dataset.form === 'admin') {
       const result = await api('/api/admin/administrators', { method: 'POST', body: { ...values, mfaRequired: values.mfaRequired === 'on' } });
-      await loadSection('administrators', true);
       form.reset();
+      try { await loadSection('administrators', true); }
+      catch { showNotice('Convite enviado. Atualize a equipe para carregar os dados mais recentes.', 'warning', false); return; }
       showNotice(result.message || 'Convite administrativo enviado.');
       return;
     }
     if (form.dataset.form === 'admin-access') {
       await api('/api/admin/administrators', { method: 'PUT', body: { ...values, mfaRequired: values.mfaRequired === 'on' } });
       state.modal = null;
+      state.modalDirty = false;
       await loadSection('administrators', true);
       showNotice('Acesso atualizado e registrado na auditoria.');
       return;
@@ -1123,9 +1431,11 @@
         assignedTo: values.assignedTo || null,
         dueAt: values.dueAt ? new Date(values.dueAt).toISOString() : null,
         position: Date.now(), note: values.note || null,
-        expectedUpdatedAt: card.sourceUpdatedAt
+        expectedUpdatedAt: card.sourceUpdatedAt,
+        expectedWorkUpdatedAt: card.workUpdatedAt
       } });
       state.modal = null;
+      state.modalDirty = false;
       if (card.source === 'support') state.tickets = null;
       if (card.source === 'beta') state.betaApplications = null;
       await loadSection('workboard', true);
@@ -1134,8 +1444,12 @@
       return;
     }
     if (form.dataset.form === 'beta-application') {
-      await api('/api/admin/beta-applications', { method: 'PATCH', body: { id: values.id, status: values.status, cohort: values.cohort, note: values.note } });
-      await loadSection('beta', true);
+      const application = (state.betaApplications || []).find((item) => String(item.id) === String(values.id));
+      await api('/api/admin/beta-applications', { method: 'PATCH', body: { id: values.id, status: values.status, cohort: values.cohort, note: values.note, expectedUpdatedAt: application?.updated_at } });
+      state.modalDirty = false;
+      state.modal = null;
+      try { await loadSection('beta', true); }
+      catch { showNotice('Acompanhamento salvo. Atualize o beta para carregar a ficha mais recente.', 'warning', false); return; }
       render();
       showNotice(values.status === 'active' ? 'Participante ativado; o ciclo de 90 dias começou.' : 'Acompanhamento registrado no histórico.');
       return;
@@ -1153,28 +1467,36 @@
       render();
       return;
     }
+    } finally {
+      if (state.pendingAction === pendingKey) state.pendingAction = '';
+      if (form.isConnected) setPendingElement(form, false);
+    }
   }));
 
   document.addEventListener('click', (event) => safe(async () => {
     const target = event.target.closest('[data-action]');
     if (!target) return;
     const action = target.dataset.action;
-    if (action === 'logout') return signOut();
+    if (action === 'logout') {
+      if ((state.modalDirty || state.pageDirty) && !window.confirm('Sair e descartar as alterações não salvas?')) return;
+      return signOut();
+    }
     if (action === 'copy-mfa-secret') {
       await navigator.clipboard.writeText(state.mfaMode?.secret || '');
       showNotice('Chave do autenticador copiada.');
       return;
     }
     if (action === 'section' || action === 'command-section') return openSection(target.dataset.section);
+    if (action === 'retry-section') return openSection(state.section, { history: 'replace', scroll: false });
     if (action === 'filtered-section') { state.filters.subscriptionStatus = target.dataset.filter; return openSection(target.dataset.section); }
     if (action === 'toggle-sidebar') { state.sidebarOpen = !state.sidebarOpen; render(); return; }
     if (action === 'refresh') return loadCore();
-    if (action === 'dismiss-notice') { state.notice = null; render(); return; }
-    if (action === 'close-modal') { state.modal = null; render(); return; }
-    if (action === 'manage-admin') { state.modal = { type: 'admin-access', email: target.dataset.email }; render(); return; }
-    if (action === 'view-audit') { state.modal = { type: 'audit-event', id: target.dataset.id }; render(); return; }
+    if (action === 'dismiss-notice') { state.notice = null; updateNoticeRegion(); return; }
+    if (action === 'close-modal') { closeModal(); return; }
+    if (action === 'manage-admin') { openModal({ type: 'admin-access', email: target.dataset.email }, target); return; }
+    if (action === 'view-audit') { openModal({ type: 'audit-event', id: target.dataset.id }, target); return; }
     if (action === 'work-view') { state.workView = target.dataset.view || 'radar'; render(); return; }
-    if (action === 'organize-work') { state.modal = { type: 'work-item', key: target.dataset.key }; render(); return; }
+    if (action === 'organize-work') { openModal({ type: 'work-item', key: target.dataset.key }, target); return; }
     if (action === 'open-work-item') {
       const card = (state.workCards || []).find((item) => item.key === target.dataset.key);
       if (!card) return;
@@ -1183,17 +1505,17 @@
         return openSection('support');
       }
       if (!state.betaApplications) await loadSection('beta', true);
-      state.modal = { type: 'beta-application', id: card.sourceId };
-      render();
+      openModal({ type: 'beta-application', id: card.sourceId }, target);
       return;
     }
-    if (action === 'open-beta') { state.modal = { type: 'beta-application', id: target.dataset.id }; render(); return; }
-    if (action === 'open-plan') { state.modal = { type: 'plan' }; render(); return; }
-    if (action === 'edit-plan') { state.modal = { type: 'plan', id: target.dataset.id }; render(); return; }
-    if (action === 'duplicate-plan') { state.modal = { type: 'plan', id: target.dataset.id, duplicate: true }; render(); return; }
+    if (action === 'open-beta') { openModal({ type: 'beta-application', id: target.dataset.id }, target); return; }
+    if (action === 'open-plan') { openModal({ type: 'plan' }, target); return; }
+    if (action === 'edit-plan') { openModal({ type: 'plan', id: target.dataset.id }, target); return; }
+    if (action === 'duplicate-plan') { openModal({ type: 'plan', id: target.dataset.id, duplicate: true }, target); return; }
     if (action === 'select-all-permissions' || action === 'clear-permissions') {
       const form = target.closest('form');
       form?.querySelectorAll('input[type="checkbox"][name="permissions"]').forEach((checkbox) => { checkbox.checked = action === 'select-all-permissions'; });
+      if (form?.closest('.modal-shell')) state.modalDirty = true;
       updatePermissionSummary(form);
       return;
     }
@@ -1202,14 +1524,15 @@
       const checkboxes = [...target.closest('[data-permission-group]')?.querySelectorAll('input[name="permissions"]') || []];
       const shouldSelect = checkboxes.some((checkbox) => !checkbox.checked);
       checkboxes.forEach((checkbox) => { checkbox.checked = shouldSelect; });
+      if (form?.closest('.modal-shell')) state.modalDirty = true;
       updatePermissionSummary(form);
       return;
     }
-    if (action === 'open-catalog-item') { state.modal = { type: 'catalog-item' }; render(); return; }
-    if (action === 'edit-catalog-item') { state.modal = { type: 'catalog-item', id: target.dataset.id }; render(); return; }
+    if (action === 'open-catalog-item') { openModal({ type: 'catalog-item' }, target); return; }
+    if (action === 'edit-catalog-item') { openModal({ type: 'catalog-item', id: target.dataset.id }, target); return; }
     if (action === 'generate-password') {
       const input = target.closest('form')?.querySelector('[name="initialPassword"]');
-      if (input) { input.value = randomPassword(); input.focus(); input.select(); }
+      if (input) { input.value = randomPassword(); state.pageDirty = true; input.focus(); input.select(); }
       return;
     }
     if (action === 'copy-onboarding') {
@@ -1218,12 +1541,17 @@
       showNotice('Informação copiada com segurança.');
       return;
     }
-    if (action === 'view-provisioned-customer') { state.modal = { type: 'tenant', id: target.dataset.id }; render(); return; }
+    if (action === 'view-provisioned-customer') {
+      if (!confirmCredentialExit()) return;
+      openModal({ type: 'tenant', id: target.dataset.id }, target);
+      return;
+    }
     if (action === 'open-provision') return openSection('provision');
-    if (action === 'open-tenant') { state.globalQuery = ''; state.modal = { type: 'tenant', id: target.dataset.id }; render(); return; }
-    if (action === 'edit-subscription') { state.modal = { type: 'subscription', id: target.dataset.id }; render(); return; }
+    if (action === 'open-tenant') { state.globalQuery = ''; openModal({ type: 'tenant', id: target.dataset.id }, target); return; }
+    if (action === 'edit-subscription') { openModal({ type: 'subscription', id: target.dataset.id }, target); return; }
     if (action === 'tenant-catalog') {
       state.modal = null;
+      state.modalDirty = false;
       state.selectedTenant = target.dataset.id;
       const tenant = state.tenants.find((item) => String(item.accountId || item.id) === String(target.dataset.id));
       state.selectedStore = tenant?.stores?.[0]?.storeId || tenant?.stores?.[0]?.id || '';
@@ -1233,73 +1561,105 @@
     if (action === 'ticket-filter') { state.filters.ticketStatus = target.dataset.value; render(); return; }
     if (action === 'select-ticket') { state.selectedTicketId = target.dataset.id; render(); return; }
     if (action === 'open-ticket') { state.selectedTicketId = target.dataset.id; return openSection('support'); }
-    if (action === 'reload-tickets') { state.loading = true; render(); await loadSection('support', true); state.loading = false; render(); return; }
-    if (action === 'reload-workboard') { state.workCards = null; state.loading = true; render(); await loadSection('workboard', true); state.loading = false; render(); return; }
+    if (action === 'reload-tickets') return withPending('reload-tickets', target, async () => { await loadSection('support', true); render(); });
+    if (action === 'reload-workboard') return withPending('reload-workboard', target, async () => { await loadSection('workboard', true); render(); });
     if (action === 'resolve-ticket') {
-      await api('/api/admin/tickets', { method: 'PUT', body: { id: target.dataset.id, updates: { status: 'resolved' } } });
-      const tickets = await api('/api/admin/tickets');
-      state.tickets = tickets.data || [];
-      state.ticketSummary = tickets.summary || null;
-      state.ticketMeta = tickets.meta || null;
-      showNotice('Chamado marcado como resolvido.');
-      return;
+      return withPending(`resolve-ticket:${target.dataset.id}`, target, async () => {
+        await api('/api/admin/tickets', { method: 'PUT', body: { id: target.dataset.id, updates: { status: 'resolved' } } });
+        const tickets = await api('/api/admin/tickets');
+        state.tickets = tickets.data || [];
+        state.ticketSummary = tickets.summary || null;
+        state.ticketMeta = tickets.meta || null;
+        showNotice('Chamado marcado como resolvido.');
+      });
     }
     if (action === 'reload-health') {
-      state.loading = true; render();
-      state.health = await api('/api/admin/health', { method: 'POST' });
-      state.loading = false;
-      showNotice('Diagnóstico concluído e armazenado no histórico.');
-      return;
+      return withPending('reload-health', target, async () => {
+        state.health = await api('/api/admin/health', { method: 'POST' });
+        showNotice('Diagnóstico concluído e armazenado no histórico.');
+      });
     }
     if (action === 'health-navigate') {
       if (target.dataset.section === 'subscriptions' && target.dataset.filter) state.filters.subscriptionStatus = target.dataset.filter;
       return openSection(target.dataset.section);
     }
-    if (action === 'reload-logs') { state.logs = null; state.loading = true; render(); await loadSection('logs', true); state.loading = false; render(); return; }
-    if (action === 'reload-beta') { state.betaApplications = null; state.loading = true; render(); await loadSection('beta', true); state.loading = false; render(); return; }
+    if (action === 'reload-logs') return withPending('reload-logs', target, async () => { await loadSection('logs', true); render(); });
+    if (action === 'reload-beta') return withPending('reload-beta', target, async () => { await loadSection('beta', true); render(); });
     if (action === 'convert-beta') {
-      await api('/api/admin/beta-applications', { method: 'POST', body: { id: target.dataset.id } });
-      await loadSection('beta', true); render(); showNotice('Participante criado e movido para onboarding.'); return;
+      const application = (state.betaApplications || []).find((item) => String(item.id) === String(target.dataset.id));
+      return withPending(`convert-beta:${target.dataset.id}`, target, async () => {
+        await api('/api/admin/beta-applications', { method: 'POST', body: { id: target.dataset.id, expectedUpdatedAt: application?.updated_at } });
+        state.modalDirty = false;
+        await loadSection('beta', true);
+        render();
+        showNotice('Participante criado e movido para onboarding.');
+      });
     }
     if (action === 'export-audit') { await downloadAuditCsv(); return; }
     if (action === 'audit-page') {
       state.filters.auditPage = Number(target.dataset.page || 1);
-      state.logs = null; state.loading = true; render();
-      await loadSection('logs', true); state.loading = false; render(); return;
+      return withPending('audit-page', target, async () => { await loadSection('logs', true); render(); });
     }
     if (action === 'clear-audit-filters') {
       Object.assign(state.filters, { auditQuery: '', auditCategory: 'all', auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1 });
-      state.logs = null; state.loading = true; render();
-      await loadSection('logs', true); state.loading = false; render(); return;
+      return withPending('clear-audit-filters', target, async () => { await loadSection('logs', true); render(); });
     }
     if (action === 'toggle-menu') {
-      await api('/api/admin/tenant-menu', { method: 'PUT', body: { storeId: state.selectedStore, id: target.dataset.id, item: { is_available: target.dataset.available !== 'true' } } });
-      await loadSection('catalog'); render(); showNotice('Disponibilidade atualizada.'); return;
+      return withPending(`toggle-menu:${target.dataset.id}`, target, async () => {
+        await api('/api/admin/tenant-menu', { method: 'PUT', body: { storeId: state.selectedStore, id: target.dataset.id, item: { is_available: target.dataset.available !== 'true' } } });
+        await loadSection('catalog');
+        render();
+        showNotice('Disponibilidade atualizada.');
+      });
     }
     if (action === 'delete-plan') {
       if (!confirm('Excluir este plano? Assinaturas vinculadas podem impedir a exclusão.')) return;
-      await api('/api/admin/plans', { method: 'DELETE', body: { id: target.dataset.id } });
-      state.plans = (await api('/api/admin/plans')).data || []; showNotice('Plano excluído.'); return;
+      return withPending(`delete-plan:${target.dataset.id}`, target, async () => {
+        await api('/api/admin/plans', { method: 'DELETE', body: { id: target.dataset.id } });
+        try { state.plans = (await api('/api/admin/plans')).data || []; }
+        catch { showNotice('Plano excluído. Atualize a lista para confirmar os dados mais recentes.', 'warning', false); return; }
+        showNotice('Plano excluído.');
+      });
     }
     if (action === 'delete-admin') {
       if (!confirm(`Remover ${target.dataset.email} do Control Center?`)) return;
-      await api('/api/admin/administrators', { method: 'DELETE', body: { email: target.dataset.email, reason: 'Acesso revogado pelo painel' } });
-      await loadSection('administrators', true); showNotice('Acesso revogado e histórico preservado.');
+      return withPending(`delete-admin:${target.dataset.email}`, target, async () => {
+        await api('/api/admin/administrators', { method: 'DELETE', body: { email: target.dataset.email, reason: 'Acesso revogado pelo painel' } });
+        try { await loadSection('administrators', true); }
+        catch { showNotice('Acesso revogado. Atualize a equipe para confirmar os dados mais recentes.', 'warning', false); return; }
+        showNotice('Acesso revogado e histórico preservado.');
+      });
     }
   }));
 
   document.addEventListener('input', (event) => {
+    if (event.target.closest('form[data-form="provision"]') && !event.target.matches('[readonly], [disabled]')) state.pageDirty = true;
+    if (state.modal && event.target.closest('.modal-shell form') && !event.target.matches('[readonly], [disabled], [data-permission-search]')) state.modalDirty = true;
     const permissionSearch = event.target.closest('[data-permission-search]');
     if (permissionSearch) { filterPermissionOptions(permissionSearch); return; }
     const input = event.target.closest('[data-search]');
     if (!input) return;
     const key = input.dataset.search;
-    if (key === 'global') state.globalQuery = input.value;
-    else state.filters[key] = input.value;
-    render(key);
+    if (key === 'global') {
+      state.globalQuery = input.value;
+      const region = document.querySelector('[data-command-region]');
+      if (region) region.innerHTML = commandResults();
+      input.setAttribute('aria-expanded', state.globalQuery.trim().length >= 2 ? 'true' : 'false');
+      return;
+    }
+    state.filters[key] = input.value;
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => renderPage(key), 160);
   });
 
   document.addEventListener('change', (event) => safe(async () => {
+    const credentialAck = event.target.closest('[data-credential-ack]');
+    if (credentialAck && state.modal?.type === 'onboarding-success') {
+      state.modal.credentialsAcknowledged = credentialAck.checked;
+      return;
+    }
+    if (event.target.closest('form[data-form="provision"]') && !event.target.matches('[readonly], [disabled]')) state.pageDirty = true;
+    if (state.modal && event.target.closest('.modal-shell form') && !event.target.matches('[readonly], [disabled], [data-permission-search]')) state.modalDirty = true;
     const permission = event.target.closest('input[type="checkbox"][name="permissions"]');
     if (permission) { updatePermissionSummary(permission.closest('form')); return; }
     const filter = event.target.closest('[data-filter]');
@@ -1353,24 +1713,64 @@
     if (!lane || state.workView === 'radar') return;
     event.preventDefault();
     const key = draggedWorkKey || event.dataTransfer.getData('text/plain');
-    const targetStatus = workLaneTarget(state.workView, lane.dataset.dropLane);
+    const card = (state.workCards || []).find((item) => item.key === key);
+    const targetStatus = workLaneTarget(state.workView, lane.dataset.dropLane, card?.status);
     document.querySelectorAll('[data-drop-lane].drag-over').forEach((item) => item.classList.remove('drag-over'));
     draggedWorkKey = '';
-    if (!key || !targetStatus) return;
-    state.modal = { type: 'work-item', key, targetStatus };
-    render();
+    if (!key || !card) return;
+    if (!targetStatus || (lane.dataset.dropLane === card.nativeLane && targetStatus === card.status)) {
+      showNotice('Esse card já está nesta coluna ou precisa passar pela etapa anterior.', 'error', false);
+      return;
+    }
+    openModal({ type: 'work-item', key, targetStatus }, lane);
   });
 
   document.addEventListener('keydown', (event) => {
+    const globalInput = event.target.closest?.('[data-search="global"]');
+    const commandOption = event.target.closest?.('[data-command-option]');
+    if (globalInput && ['ArrowDown', 'Enter'].includes(event.key)) {
+      const firstResult = document.querySelector('[data-command-option]');
+      if (firstResult) {
+        event.preventDefault();
+        if (event.key === 'Enter') firstResult.click();
+        else firstResult.focus();
+      }
+    }
+    if (commandOption && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      const options = [...document.querySelectorAll('[data-command-option]')];
+      const currentIndex = options.indexOf(commandOption);
+      const nextIndex = event.key === 'Home' ? 0
+        : event.key === 'End' ? options.length - 1
+          : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+      event.preventDefault();
+      options[nextIndex]?.focus();
+    }
+    if (commandOption && event.key === 'Escape') {
+      event.preventDefault();
+      document.querySelector('[data-search="global"]')?.focus();
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
       document.querySelector('[data-search="global"]')?.focus();
     }
     if (event.key === 'Escape') {
-      state.modal = null;
-      state.sidebarOpen = false;
-      state.globalQuery = '';
-      render();
+      if (state.modal) closeModal();
+      else {
+        state.sidebarOpen = false;
+        state.globalQuery = '';
+        render();
+      }
+    }
+    if (event.key === 'Tab' && state.modal) {
+      const dialog = document.querySelector('.modal-shell[role="dialog"]');
+      const focusable = [...(dialog?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+        .filter((element) => element.offsetParent !== null && !element.classList.contains('modal-backdrop'));
+      if (focusable.length) {
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
     }
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       const form = event.target.closest('form[data-form="reply"]');
@@ -1381,17 +1781,42 @@
     }
   });
 
+  window.addEventListener('popstate', () => {
+    if (!state.user) return;
+    const section = sectionFromLocation();
+    if (section !== state.section) openSection(section, { history: 'none' });
+  });
+
+  window.addEventListener('beforeunload', (event) => {
+    if (!state.modalDirty && !state.pageDirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
   async function boot() {
     render();
     if (state.inviteMode) return;
-    if (!configured() || !state.token) return;
+    if (!configured() || !state.token) { state.restoringSession = false; render(); return; }
     try {
       state.user = (await api('/api/admin/session')).data;
       if (await prepareMfa()) return;
-      await loadCore();
-    } catch {
-      await signOut();
-      showNotice('Sua sessão expirou. Entre novamente.', 'error');
+      await finishAuthenticatedBoot();
+    } catch (error) {
+      state.restoringSession = false;
+      if (error?.status === 401) {
+        await signOut();
+        showNotice('Sua sessão expirou. Entre novamente.', 'error');
+        return;
+      }
+      if (!state.user) {
+        sessionStorage.removeItem('koregastro_admin_token');
+        state.token = '';
+        render();
+        showNotice(error?.status === 403 ? 'Este usuário não possui acesso administrativo.' : 'Não foi possível validar o acesso agora. Tente novamente.', 'error', false);
+        return;
+      }
+      render();
+      showNotice(error?.message || 'Parte dos dados não pôde ser carregada. Tente atualizar a área.', 'error', false);
     }
   }
 

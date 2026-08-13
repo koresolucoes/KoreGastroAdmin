@@ -2,7 +2,9 @@ import {
   assert, assertEnum, assertUuid, auditAdminAction, bodyOf, cleanText, fail,
   hasCapability, requireAdmin, reply, supabase
 } from '../_lib/admin.js';
-import { BETA_STATUSES, updateBetaApplication } from '../_lib/beta-operations.js';
+import {
+  BETA_STATUSES, BETA_TRANSITIONS, assertBetaExpectedUpdatedAt, updateBetaApplication
+} from '../_lib/beta-operations.js';
 
 const SUPPORT_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
 const ACTIVE_SUPPORT = new Set(['open', 'in_progress']);
@@ -50,7 +52,7 @@ function supportCard(ticket, work, names) {
     title: ticket.subject || 'Chamado sem assunto', subtitle: names.get(ticket.client_id) || ticket.store_name || 'Cliente',
     detail: messages.at(-1)?.text || ticket.store_name || 'Aguardando atendimento', status: ticket.status,
     nativeLane: ticket.status, priority: ticket.priority || 'Média', assignedTo: work?.assigned_to || null,
-    dueAt: work?.due_at || null, position: Number(work?.board_position || 1024), updatedAt, sourceUpdatedAt: ticket.updated_at,
+    dueAt: work?.due_at || null, position: Number(work?.board_position || 1024), updatedAt, sourceUpdatedAt: ticket.updated_at, workUpdatedAt: work?.updated_at || null,
     attentionScore: Math.min(100, score), reasons, completed: !ACTIVE_SUPPORT.has(ticket.status),
     metadata: { waitingHours, messageCount: messages.length }
   };
@@ -91,7 +93,7 @@ function betaCard(application, work) {
     detail: events[0]?.note || application.establishment_type || application.restaurant_size || 'Candidatura do programa',
     status: application.status, nativeLane: betaLane(application.status), priority: score >= 80 ? 'Crítica' : score >= 50 ? 'Alta' : 'Normal',
     assignedTo: work?.assigned_to || application.assigned_to || null, dueAt: work?.due_at || null,
-    position: Number(work?.board_position || 1024), updatedAt, sourceUpdatedAt: application.updated_at, attentionScore: Math.min(100, score), reasons,
+    position: Number(work?.board_position || 1024), updatedAt, sourceUpdatedAt: application.updated_at, workUpdatedAt: work?.updated_at || null, attentionScore: Math.min(100, score), reasons,
     completed: !ACTIVE_BETA.has(application.status), metadata: { eventCount: events.length, participant: application.participant || null }
   };
   card.radarLane = radarLane(card);
@@ -129,6 +131,7 @@ async function loadBoard(context) {
     cards,
     meta: {
       availableBoards: [canSupport ? 'support' : null, canBeta ? 'beta' : null].filter(Boolean),
+      betaTransitions: canBeta ? BETA_TRANSITIONS : undefined,
       currentUser: context.user.email,
       summary: {
         total: cards.length,
@@ -162,10 +165,20 @@ async function saveWorkState(source, id, payload) {
     body.board_position = position;
   }
   if (Object.keys(body).length === 2) return null;
-  const result = await supabase(`/rest/v1/admin_work_items?on_conflict=${conflict}`, {
-    method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' }, body
+  if (payload.expectedWorkUpdatedAt) {
+    const result = await supabase(`/rest/v1/admin_work_items?${conflict}=eq.${encodeURIComponent(id)}&updated_at=eq.${encodeURIComponent(payload.expectedWorkUpdatedAt)}`, {
+      method: 'PATCH', headers: { Prefer: 'return=representation' }, body
+    });
+    assert(result.data?.[0], 'A organização deste card foi atualizada por outra sessão. Recarregue o quadro.', 409);
+    return result.data[0];
+  }
+  const existing = await supabase(`/rest/v1/admin_work_items?select=id,updated_at&${conflict}=eq.${encodeURIComponent(id)}&limit=1`);
+  assert(!existing.data?.[0], 'A organização deste card foi atualizada por outra sessão. Recarregue o quadro.', 409);
+  const result = await supabase('/rest/v1/admin_work_items', {
+    method: 'POST', headers: { Prefer: 'return=representation' }, body
   });
-  return result.data?.[0] || body;
+  assert(result.data?.[0], 'Não foi possível salvar a organização do card.', 502);
+  return result.data[0];
 }
 
 export default async function handler(req, res) {
@@ -198,18 +211,28 @@ export default async function handler(req, res) {
       }
       if (Object.keys(updates).length) {
         updates.updated_at = new Date().toISOString();
-        const result = await supabase(`/rest/v1/support_tickets?id=eq.${encodeURIComponent(payload.id)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: updates });
-        after = result.data?.[0] || { ...before, ...updates };
+        const versionFilter = before.updated_at ? `&updated_at=eq.${encodeURIComponent(before.updated_at)}` : '';
+        const result = await supabase(`/rest/v1/support_tickets?id=eq.${encodeURIComponent(payload.id)}${versionFilter}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: updates });
+        assert(result.data?.[0], 'Este chamado foi atualizado por outra sessão. Recarregue o quadro.', 409);
+        after = result.data[0];
       } else after = before;
     } else {
       const current = await supabase(`/rest/v1/beta_applications?select=id,status,updated_at&id=eq.${encodeURIComponent(payload.id)}&limit=1`);
       assert(current.data?.[0], 'Candidatura não encontrada.', 404);
       before = current.data[0];
-      if (payload.expectedUpdatedAt) assert(String(before.updated_at) === String(payload.expectedUpdatedAt), 'Esta candidatura foi atualizada por outra sessão. Recarregue o quadro.', 409);
+      assertBetaExpectedUpdatedAt(before.updated_at, payload.expectedUpdatedAt);
       const nextStatus = payload.status === undefined ? before.status : cleanText(payload.status, 30);
       assertEnum(nextStatus, BETA_STATUSES, 'status');
       if (nextStatus !== before.status || note || Object.hasOwn(payload, 'assignedTo')) {
-        const result = await updateBetaApplication(context, { id: payload.id, status: nextStatus, note, cohort: payload.cohort, assignedTo: payload.assignedTo });
+        const betaUpdate = {
+          id: payload.id,
+          status: nextStatus,
+          note,
+          cohort: payload.cohort,
+          expectedUpdatedAt: payload.expectedUpdatedAt
+        };
+        if (Object.hasOwn(payload, 'assignedTo')) betaUpdate.assignedTo = payload.assignedTo;
+        const result = await updateBetaApplication(context, betaUpdate);
         after = result.data;
       } else after = before;
     }
