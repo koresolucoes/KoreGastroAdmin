@@ -83,6 +83,10 @@ async function ensurePrimaryStore(accountId, storeName, renameTriggerStore = fal
     return { store, created: false };
   }
 
+  // Compatibility contract: the current ChefOS schema still couples the first
+  // store id to the owner account in several legacy relations, including the
+  // subscriptions.user_id -> stores.id FK. Do not decouple ids here until that
+  // database migration exists.
   const created = await supabase('/rest/v1/stores', {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
@@ -109,8 +113,8 @@ async function ensureCompanyProfile(store, values) {
   return externalApiKey;
 }
 
-async function ensureSubscription(accountId, plan) {
-  const existing = await supabase(`/rest/v1/subscriptions?select=*&user_id=eq.${encodeURIComponent(accountId)}&limit=1`);
+async function ensureSubscription(storeId, plan) {
+  const existing = await supabase(`/rest/v1/subscriptions?select=*&user_id=eq.${encodeURIComponent(storeId)}&limit=1`);
   if (existing.data?.[0]) return { subscription: existing.data[0], created: false };
 
   const trialDays = Math.max(1, Number(plan.trial_period_days || 30));
@@ -118,7 +122,8 @@ async function ensureSubscription(accountId, plan) {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
     body: {
-      user_id: accountId,
+      // Legacy column name: user_id references stores.id in the current schema.
+      user_id: storeId,
       plan_id: plan.id,
       status: 'trialing',
       current_period_end: new Date(Date.now() + trialDays * DAY).toISOString(),
@@ -128,7 +133,50 @@ async function ensureSubscription(accountId, plan) {
   return { subscription: created.data?.[0], created: true };
 }
 
-async function ensureStoreAccess(accountId, storeId) {
+async function ensureOwnerMembership(accountId, storeId) {
+  const existing = await supabase(`/rest/v1/store_memberships?select=id,access_level,status,accepted_at,revoked_at&store_id=eq.${encodeURIComponent(storeId)}&account_id=eq.${encodeURIComponent(accountId)}&limit=1`);
+  const now = new Date().toISOString();
+
+  if (existing.data?.[0]) {
+    const membership = existing.data[0];
+    const healthy = membership.access_level === 'OWNER'
+      && membership.status === 'ACTIVE'
+      && Boolean(membership.accepted_at)
+      && !membership.revoked_at;
+    if (healthy) return { membership, created: false, repaired: false };
+
+    const repaired = await supabase(`/rest/v1/store_memberships?id=eq.${encodeURIComponent(membership.id)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: {
+        access_level: 'OWNER',
+        status: 'ACTIVE',
+        accepted_at: membership.accepted_at || now,
+        revoked_at: null,
+        updated_at: now
+      }
+    });
+    return { membership: repaired.data?.[0] || { ...membership, access_level: 'OWNER', status: 'ACTIVE', accepted_at: membership.accepted_at || now, revoked_at: null }, created: false, repaired: true };
+  }
+
+  const created = await supabase('/rest/v1/store_memberships', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: {
+      store_id: storeId,
+      account_id: accountId,
+      access_level: 'OWNER',
+      status: 'ACTIVE',
+      accepted_at: now
+    }
+  });
+  return { membership: created.data?.[0], created: true, repaired: false };
+}
+
+async function ensureLegacyStoreAccess(accountId, storeId) {
+  // Temporary compatibility write. Canonical management authority is
+  // store_memberships; unit_permissions remains until the ChefOS legacy readers
+  // are fully retired.
   await supabase('/rest/v1/unit_permissions?on_conflict=manager_id,store_id', {
     method: 'POST',
     headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -203,8 +251,9 @@ export default async function handler(req, res) {
     const { store, created: storeCreated } = await ensurePrimaryStore(accountId, storeName, authUserCreated);
     assert(store?.id, 'Não foi possível criar ou localizar a loja principal.');
     const externalApiKey = await ensureCompanyProfile(store, values);
-    const { subscription, created: subscriptionCreated } = await ensureSubscription(accountId, plan);
-    await ensureStoreAccess(accountId, store.id);
+    const { membership, created: membershipCreated, repaired: membershipRepaired } = await ensureOwnerMembership(accountId, store.id);
+    const { subscription, created: subscriptionCreated } = await ensureSubscription(store.id, plan);
+    await ensureLegacyStoreAccess(accountId, store.id);
     const hall = await ensureDiningRoom(store.id);
 
     await auditAdminAction(context, 'ADMIN_TENANT_PROVISIONED', {
@@ -213,12 +262,14 @@ export default async function handler(req, res) {
       planId: plan.id,
       authUserCreated,
       storeCreated,
+      membershipCreated,
+      membershipRepaired,
       subscriptionCreated
     });
 
-    return reply(res, authUserCreated || storeCreated || subscriptionCreated ? 201 : 200, {
+    return reply(res, authUserCreated || storeCreated || membershipCreated || subscriptionCreated ? 201 : 200, {
       success: true,
-      idempotent: !authUserCreated && !storeCreated && !subscriptionCreated,
+      idempotent: !authUserCreated && !storeCreated && !membershipCreated && !membershipRepaired && !subscriptionCreated,
       auth: {
         accountId,
         email: authUser.email || cleanText(payload.email, 254).toLowerCase(),
@@ -229,6 +280,9 @@ export default async function handler(req, res) {
         accountId,
         storeId: store.id,
         storeName: store.name,
+        membershipId: membership?.id || null,
+        membershipAccessLevel: membership?.access_level || 'OWNER',
+        membershipStatus: membership?.status || 'ACTIVE',
         planId: plan.id,
         subscriptionId: subscription?.id || null,
         subscriptionStatus: subscription?.status || null,

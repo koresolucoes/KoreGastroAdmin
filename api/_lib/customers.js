@@ -1,4 +1,5 @@
 import { supabase, supabaseAll } from './admin.js';
+import { isSubscriptionEntitled } from './subscription-entitlements.js';
 
 const normalize = (value = '') => String(value)
   .normalize('NFD')
@@ -19,57 +20,92 @@ async function listAuthUsers(maxUsers = 10000) {
 
 function normalizeSubscription(item, now) {
   if (!item) return null;
-  const periodTime = item.current_period_end ? new Date(item.current_period_end).getTime() : null;
-  const periodExpired = Number.isFinite(periodTime) && periodTime < now;
-  const entitlementActive = ['active', 'trialing'].includes(item.status) && !periodExpired;
+  const periodTime = item.current_period_end ? Date.parse(item.current_period_end) : null;
+  const periodExpired = Number.isFinite(periodTime) && periodTime <= now;
   return {
     ...item,
-    accountId: item.user_id,
+    // subscriptions.user_id is a legacy column name whose FK targets stores.id.
+    storeId: item.user_id,
     planId: item.plan_id,
     currentPeriodEnd: item.current_period_end,
     cancelAtPeriodEnd: Boolean(item.cancel_at_period_end),
     canceledAt: item.canceled_at || null,
     providerSubscriptionId: item.mercado_pago_subscription_id || null,
     periodExpired,
-    entitlementActive
+    entitlementActive: isSubscriptionEntitled(item, now)
+  };
+}
+
+function enrichMembership(membership, userById, profileById) {
+  const account = userById.get(membership.account_id) || null;
+  const profile = profileById.get(membership.account_id) || null;
+  return {
+    ...membership,
+    accountId: membership.account_id,
+    storeId: membership.store_id,
+    accessLevel: membership.access_level,
+    account: account ? {
+      email: account.email || null,
+      fullName: profile?.full_name || account.user_metadata?.full_name || null
+    } : null
   };
 }
 
 export async function buildCustomerDataset() {
   const usersPromise = listAuthUsers();
-  const [users, profiles, stores, subscriptions, companyProfiles, tickets, administrators] = await Promise.all([
+  const [users, profiles, stores, subscriptions, memberships, companyProfiles, tickets, administrators] = await Promise.all([
     usersPromise,
     supabaseAll('/rest/v1/profiles?select=id,full_name,avatar_url,created_at,updated_at'),
     supabaseAll('/rest/v1/stores?select=id,name,owner_id,created_at&order=created_at.asc'),
     supabaseAll('/rest/v1/subscriptions?select=id,user_id,plan_id,status,current_period_end,created_at,updated_at,mercado_pago_subscription_id,cancel_at_period_end,canceled_at,payment_method_id&order=created_at.desc'),
+    supabaseAll('/rest/v1/store_memberships?select=id,store_id,account_id,access_level,status,linked_employee_id,accepted_at,revoked_at,created_at,updated_at').catch(() => []),
     supabaseAll('/rest/v1/company_profile?select=user_id,company_name,cnpj,phone,address,created_at'),
     supabaseAll('/rest/v1/support_tickets?select=id,client_id,status,priority,created_at,updated_at').catch(() => []),
     supabaseAll('/rest/v1/system_admins?select=email').catch(() => [])
   ]);
 
   const now = Date.now();
+  const userById = new Map(users.map((user) => [user.id, user]));
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
   const companyByStore = new Map(companyProfiles.map((profile) => [profile.user_id, profile]));
+  const subscriptionsByStore = new Map();
+  const membershipsByStore = new Map();
   const storesByOwner = new Map();
-  const subscriptionsByAccount = new Map();
   const ticketsByAccount = new Map();
   const administratorEmails = new Set(administrators.map((admin) => normalize(admin.email)));
 
+  for (const item of subscriptions) {
+    const normalized = normalizeSubscription(item, now);
+    const items = subscriptionsByStore.get(item.user_id) || [];
+    items.push(normalized);
+    subscriptionsByStore.set(item.user_id, items);
+  }
+
+  for (const membership of memberships) {
+    const items = membershipsByStore.get(membership.store_id) || [];
+    items.push(enrichMembership(membership, userById, profileById));
+    membershipsByStore.set(membership.store_id, items);
+  }
+
   for (const store of stores) {
+    const storeMemberships = membershipsByStore.get(store.id) || [];
+    const ownerMembership = storeMemberships.find((membership) =>
+      membership.account_id === store.owner_id
+      && membership.access_level === 'OWNER'
+      && membership.status === 'ACTIVE'
+    ) || null;
     const items = storesByOwner.get(store.owner_id) || [];
     items.push({
       ...store,
       storeId: store.id,
-      profile: companyByStore.get(store.id) || null
+      profile: companyByStore.get(store.id) || null,
+      subscriptions: subscriptionsByStore.get(store.id) || [],
+      subscription: subscriptionsByStore.get(store.id)?.[0] || null,
+      memberships: storeMemberships,
+      membershipCount: storeMemberships.filter((membership) => membership.status === 'ACTIVE').length,
+      ownerMembershipHealthy: Boolean(ownerMembership)
     });
     storesByOwner.set(store.owner_id, items);
-  }
-
-  for (const item of subscriptions) {
-    const normalized = normalizeSubscription(item, now);
-    const items = subscriptionsByAccount.get(item.user_id) || [];
-    items.push(normalized);
-    subscriptionsByAccount.set(item.user_id, items);
   }
 
   for (const ticket of tickets) {
@@ -79,12 +115,12 @@ export async function buildCustomerDataset() {
   }
 
   return users.filter((user) => {
-    const ownsOperation = storesByOwner.has(user.id) || subscriptionsByAccount.has(user.id);
+    const ownsOperation = storesByOwner.has(user.id);
     return ownsOperation || !administratorEmails.has(normalize(user.email));
   }).map((user) => {
     const profile = profileById.get(user.id) || {};
     const accountStores = storesByOwner.get(user.id) || [];
-    const accountSubscriptions = subscriptionsByAccount.get(user.id) || [];
+    const accountSubscriptions = accountStores.flatMap((store) => store.subscriptions || []);
     const accountTickets = ticketsByAccount.get(user.id) || [];
     const subscription = accountSubscriptions[0] || null;
     const missing = [];
@@ -94,6 +130,7 @@ export async function buildCustomerDataset() {
     } else if (accountStores.length && !accountStores.some((store) => store.profile?.cnpj && store.profile.cnpj !== '00.000.000/0000-00')) {
       missing.push('company_data');
     }
+    if (accountStores.some((store) => !store.ownerMembershipHealthy)) missing.push('owner_membership');
     if (!subscription) missing.push('subscription');
 
     return {
@@ -114,6 +151,10 @@ export async function buildCustomerDataset() {
       onboarding: {
         complete: missing.length === 0,
         missing
+      },
+      access: {
+        activeMemberships: accountStores.reduce((total, store) => total + (store.membershipCount || 0), 0),
+        ownerMembershipsHealthy: accountStores.every((store) => store.ownerMembershipHealthy)
       },
       support: {
         totalTickets: accountTickets.length,
@@ -148,6 +189,7 @@ export function customerSummary(customers) {
     summary.stores += customer.stores.length;
     summary.openTickets += customer.support.openTickets;
     if (!customer.onboarding.complete) summary.incompleteOnboarding += 1;
+    if (customer.onboarding.missing.includes('owner_membership')) summary.membershipIssues += 1;
     if (!subscription) summary.withoutSubscription += 1;
     else summary.subscriptions[subscription.status] = (summary.subscriptions[subscription.status] || 0) + 1;
     return summary;
@@ -156,6 +198,7 @@ export function customerSummary(customers) {
     stores: 0,
     openTickets: 0,
     incompleteOnboarding: 0,
+    membershipIssues: 0,
     withoutSubscription: 0,
     subscriptions: {}
   });

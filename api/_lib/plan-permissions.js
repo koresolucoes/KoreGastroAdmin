@@ -31,6 +31,7 @@ export const PLAN_PERMISSION_GROUPS = [
       { key: '/menu', name: 'Cardápio da operação', description: 'Produtos, categorias, preços e disponibilidade.' },
       { key: '/menu-builder', name: 'Construtor de cardápios', description: 'Criação e publicação de cardápios digitais.' },
       { key: '/delivery', name: 'Painel de entregas', description: 'Gestão dos pedidos recebidos para entrega.' },
+      { key: '/delivery-tracking', name: 'Rastreamento de entregas', description: 'Acompanhamento operacional das entregas em rota.' },
       { key: '/ifood-kds', name: 'Produção do iFood', description: 'Pedidos do iFood integrados à cozinha.' },
       { key: '/ifood-menu', name: 'Cardápio do iFood', description: 'Sincronização e gestão do cardápio no iFood.' },
       { key: '/ifood-store-manager', name: 'Gestão da loja no iFood', description: 'Status e configurações operacionais da integração.' }
@@ -55,7 +56,8 @@ export const PLAN_PERMISSION_GROUPS = [
       { key: '/dashboard', name: 'Painel gerencial', description: 'Indicadores e visão geral do restaurante.' },
       { key: '/performance', name: 'Desempenho', description: 'Metas e acompanhamento dos resultados da operação.' },
       { key: '/reports', name: 'Relatórios', description: 'Análises detalhadas para tomada de decisão.' },
-      { key: '/whatsapp-chats', name: 'Atendimento por WhatsApp', description: 'Conversas e automações do canal de atendimento.' }
+      { key: '/whatsapp', name: 'WhatsApp', description: 'Acesso ao módulo principal de atendimento e integração via WhatsApp.' },
+      { key: '/whatsapp-chats', name: 'Conversas do WhatsApp', description: 'Conversas e automações do canal de atendimento.' }
     ]
   },
   {
