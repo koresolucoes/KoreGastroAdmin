@@ -54,8 +54,10 @@ test('scroll horizontal, kanban e overlays possuem comportamento explícito', ()
   assert.match(uxCss, /\.detail-drawer[\s\S]*overflow-y:\s*auto\s*!important/);
 });
 
-test('a camada UX é progressiva e observa rerenders do app', () => {
-  assert.match(uxJs, /new MutationObserver\(scheduleEnhance\)/);
+test('a camada UX é progressiva e observa rerenders sem reagir às próprias inserções', () => {
+  assert.match(uxJs, /const observer = new MutationObserver\(scheduleEnhance\)/);
+  assert.match(uxJs, /observer\.disconnect\(\)/);
+  assert.match(uxJs, /finally \{ observe\(\); \}/);
   assert.match(uxJs, /requestAnimationFrame/);
   assert.doesNotMatch(uxJs, /fetch\(/);
   assert.doesNotMatch(uxJs, /\/api\/admin\//);
