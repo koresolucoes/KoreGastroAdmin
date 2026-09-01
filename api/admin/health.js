@@ -8,6 +8,7 @@ import {
   supabase,
   supabaseAuthAdmin
 } from '../_lib/admin.js';
+import { ENTITLED_SUBSCRIPTION_STATUSES, isSubscriptionEntitled } from '../_lib/subscription-entitlements.js';
 
 const NOW = () => new Date();
 
@@ -60,6 +61,8 @@ export default async function handler(req, res) {
       probe('database', () => supabase('/rest/v1/plans?select=id&limit=1')),
       probe('auth', () => supabaseAuthAdmin('/admin/users?page=1&per_page=1000')),
       probe('subscriptions', () => supabase('/rest/v1/subscriptions?select=id,user_id,status,current_period_end,updated_at&limit=1000')),
+      probe('memberships', () => supabase('/rest/v1/store_memberships?select=id,store_id,account_id,access_level,status,accepted_at,revoked_at&limit=5000')),
+      probe('stores', () => supabase('/rest/v1/stores?select=id,owner_id&limit=5000')),
       probe('invoices', () => supabase(`/rest/v1/subscription_invoices?select=id,status,created_at&created_at=gte.${encodeURIComponent(sevenDaysAgo)}&limit=1000`)),
       probe('plans', () => supabase('/rest/v1/plans?select=id,name,price,recurring,preapproval_plan_id&limit=1000')),
       probe('ifood', () => supabase(`/rest/v1/ifood_webhook_logs?select=id,processing_status,error_message,created_at&created_at=gte.${encodeURIComponent(oneDayAgo)}&limit=1000`)),
@@ -105,12 +108,32 @@ export default async function handler(req, res) {
     ));
 
     const subscriptions = byName.subscriptions.data || [];
-    const expiredAccess = subscriptions.filter((item) => ['active', 'trialing'].includes(item.status) && item.current_period_end && new Date(item.current_period_end) < NOW()).length;
+    const expiredAccess = subscriptions.filter((item) => ENTITLED_SUBSCRIPTION_STATUSES.includes(item.status) && !isSubscriptionEntitled(item)).length;
+    const pastDueWithAccess = subscriptions.filter((item) => item.status === 'past_due' && isSubscriptionEntitled(item)).length;
     checks.push(check(
       'expired_access', 'Acessos vencidos', 'business',
       !byName.subscriptions.ok ? 'unknown' : expiredAccess ? 'degraded' : 'ok',
-      !byName.subscriptions.ok ? errorMessage(byName.subscriptions, 'Não foi possível consultar assinaturas.') : expiredAccess ? `${expiredAccess} assinatura(s) ativa(s) estão com período vencido.` : 'Nenhum acesso ativo com período vencido.',
-      { value: expiredAccess, action: expiredAccess ? { section: 'subscriptions', filter: 'past_due' } : null }
+      !byName.subscriptions.ok ? errorMessage(byName.subscriptions, 'Não foi possível consultar assinaturas.') : expiredAccess ? `${expiredAccess} assinatura(s) com status elegível estão com período vencido e portanto sem entitlement.` : 'Nenhum acesso elegível está com período vencido.',
+      { value: expiredAccess, entitlementStatuses: ENTITLED_SUBSCRIPTION_STATUSES, action: expiredAccess ? { section: 'subscriptions' } : null }
+    ));
+    checks.push(check(
+      'past_due_access', 'Past due com acesso', 'business',
+      !byName.subscriptions.ok ? 'unknown' : pastDueWithAccess ? 'attention' : 'ok',
+      !byName.subscriptions.ok ? errorMessage(byName.subscriptions, 'Não foi possível consultar assinaturas.') : pastDueWithAccess ? `${pastDueWithAccess} assinatura(s) past_due permanecem com acesso conforme a política canônica do ChefOS.` : 'Nenhuma assinatura past_due com acesso ativo.',
+      { value: pastDueWithAccess, action: pastDueWithAccess ? { section: 'subscriptions', filter: 'past_due' } : null }
+    ));
+
+    const stores = byName.stores.data || [];
+    const memberships = byName.memberships.data || [];
+    const membershipKey = new Set(memberships
+      .filter((item) => item.access_level === 'OWNER' && item.status === 'ACTIVE' && item.accepted_at && !item.revoked_at)
+      .map((item) => `${item.store_id}:${item.account_id}`));
+    const missingOwnerMemberships = stores.filter((store) => !membershipKey.has(`${store.id}:${store.owner_id}`)).length;
+    checks.push(check(
+      'owner_memberships', 'OWNER memberships', 'security',
+      !byName.memberships.ok || !byName.stores.ok ? 'unknown' : missingOwnerMemberships ? 'degraded' : 'ok',
+      !byName.memberships.ok || !byName.stores.ok ? 'Não foi possível validar memberships das lojas.' : missingOwnerMemberships ? `${missingOwnerMemberships} loja(s) não possuem OWNER membership canônico íntegro.` : 'Todas as lojas possuem OWNER membership canônico íntegro.',
+      { value: missingOwnerMemberships, action: missingOwnerMemberships ? { section: 'customers' } : null }
     ));
 
     const invoices = byName.invoices.data || [];
@@ -179,6 +202,8 @@ export default async function handler(req, res) {
     const durationMs = Date.now() - startedAt;
     const metrics = {
       expiredAccess,
+      pastDueWithAccess,
+      missingOwnerMemberships,
       failedInvoices,
       paymentGaps,
       ifoodErrors,
