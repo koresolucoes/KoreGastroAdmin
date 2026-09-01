@@ -1,5 +1,6 @@
 import { fail, requireAdmin, reply, supabaseAll } from '../_lib/admin.js';
 import { buildCustomerDataset, customerSummary } from '../_lib/customers.js';
+import { ENTITLED_SUBSCRIPTION_STATUSES } from '../_lib/subscription-entitlements.js';
 
 const DAY = 86400000;
 
@@ -18,16 +19,20 @@ export default async function handler(req, res) {
 
     const now = Date.now();
     const planById = new Map(plans.map((plan) => [plan.id, plan]));
-    const subscriptions = customers.map((customer) => customer.subscription).filter(Boolean);
+    const subscriptions = customers.flatMap((customer) => customer.subscriptions || []).filter(Boolean);
     const validActive = subscriptions.filter((item) => item.status === 'active' && item.entitlementActive);
     const validTrials = subscriptions.filter((item) => item.status === 'trialing' && item.entitlementActive);
-    const expiredButEnabled = subscriptions.filter((item) => ['active', 'trialing'].includes(item.status) && item.periodExpired);
+    const validPastDue = subscriptions.filter((item) => item.status === 'past_due' && item.entitlementActive);
+    const entitledSubscriptions = subscriptions.filter((item) => item.entitlementActive);
+    const expiredButEnabled = subscriptions.filter((item) => ENTITLED_SUBSCRIPTION_STATUSES.includes(item.status) && item.periodExpired);
     const byStatus = subscriptions.reduce((acc, item) => {
       acc[item.status || 'unknown'] = (acc[item.status || 'unknown'] || 0) + 1;
       return acc;
     }, {});
-    const contractedMonthly = validActive.reduce((total, item) => total + Number(planById.get(item.plan_id)?.price || 0), 0);
-    const renewalsNext7Days = validActive.filter((item) => {
+    const contractedMonthly = entitledSubscriptions
+      .filter((item) => item.status !== 'trialing')
+      .reduce((total, item) => total + Number(planById.get(item.plan_id)?.price || 0), 0);
+    const renewalsNext7Days = entitledSubscriptions.filter((item) => item.status !== 'trialing').filter((item) => {
       const renewal = new Date(item.current_period_end).getTime();
       return Number.isFinite(renewal) && renewal >= now && renewal <= now + (7 * DAY);
     }).length;
@@ -56,10 +61,13 @@ export default async function handler(req, res) {
         tenants: summary.total,
         stores: summary.stores,
         incompleteOnboarding: summary.incompleteOnboarding,
+        membershipIssues: summary.membershipIssues,
         withoutSubscription: summary.withoutSubscription,
         subscriptions: byStatus,
         activeSubscriptions: validActive.length,
         activeTrials: validTrials.length,
+        pastDueWithAccess: validPastDue.length,
+        entitledSubscriptions: entitledSubscriptions.length,
         expiredButEnabled: expiredButEnabled.length,
         contractedMonthly,
         mrr: contractedMonthly,
@@ -76,9 +84,12 @@ export default async function handler(req, res) {
         dataQuality: {
           revenueMode: 'contracted_estimate',
           providerReconciliation: false,
+          entitlementStatuses: ENTITLED_SUBSCRIPTION_STATUSES,
           warnings: [
             'Receita calculada pelo preço atual do plano; ainda não reconciliada com recorrência do Mercado Pago.',
-            ...(expiredButEnabled.length ? [`${expiredButEnabled.length} assinatura(s) com status ativo/trial e período vencido.`] : [])
+            ...(validPastDue.length ? [`${validPastDue.length} assinatura(s) past_due permanecem com acesso por política canônica do ChefOS.`] : []),
+            ...(expiredButEnabled.length ? [`${expiredButEnabled.length} assinatura(s) com status elegível estão com período vencido e portanto sem entitlement.`] : []),
+            ...(summary.membershipIssues ? [`${summary.membershipIssues} cliente(s) possuem inconsistência no OWNER membership.`] : [])
           ]
         }
       }
