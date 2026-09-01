@@ -1,0 +1,333 @@
+/* ChefOS Control Center — canonical UX enhancement layer
+   This file intentionally loads after the legacy theme and only owns navigation,
+   guidance, pagination, scroll ergonomics and overlay behavior. */
+
+:root {
+  --ux-sidebar-expanded: 252px;
+  --ux-sidebar-collapsed: 76px;
+  --ux-guide-bg: rgba(132, 170, 255, .055);
+  --ux-guide-line: rgba(132, 170, 255, .18);
+}
+
+html { scrollbar-gutter: stable; }
+body { overflow-x: clip; }
+.content, .page, .workspace { min-width: 0; }
+.header-actions { flex-wrap: wrap; }
+
+/* Desktop sidebar can collapse without changing the mobile drawer behavior. */
+@media (min-width: 1181px) {
+  .app-shell {
+    grid-template-columns: var(--ux-sidebar-expanded) minmax(0, 1fr);
+    transition: grid-template-columns .2s ease;
+  }
+
+  .app-shell.ux-sidebar-collapsed {
+    grid-template-columns: var(--ux-sidebar-collapsed) minmax(0, 1fr);
+  }
+
+  .sidebar { width: 100%; transition: width .2s ease; }
+  .ux-sidebar-toggle { display: grid; margin-left: auto; flex: 0 0 auto; }
+
+  .sidebar.ux-sidebar-collapsed .brand {
+    justify-content: center;
+    gap: 0;
+    padding-inline: 10px;
+  }
+  .sidebar.ux-sidebar-collapsed .brand > span:nth-child(2),
+  .sidebar.ux-sidebar-collapsed .nav-label,
+  .sidebar.ux-sidebar-collapsed .nav-item > span:nth-child(2),
+  .sidebar.ux-sidebar-collapsed .system-pill span,
+  .sidebar.ux-sidebar-collapsed .user-card > span:nth-child(2),
+  .sidebar.ux-sidebar-collapsed .ux-help-link strong {
+    display: none;
+  }
+  .sidebar.ux-sidebar-collapsed .brand-mark { width: 36px; height: 36px; }
+  .sidebar.ux-sidebar-collapsed .ux-sidebar-toggle {
+    position: absolute;
+    right: -13px;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    border-color: var(--line);
+    border-radius: 50%;
+    color: var(--text);
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+  }
+  .sidebar.ux-sidebar-collapsed nav { padding-inline: 10px; }
+  .sidebar.ux-sidebar-collapsed .nav-group { margin-bottom: 10px; }
+  .sidebar.ux-sidebar-collapsed .nav-item {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding-inline: 8px;
+  }
+  .sidebar.ux-sidebar-collapsed .nav-item b {
+    position: absolute;
+    margin: -25px 0 0 25px;
+  }
+  .sidebar.ux-sidebar-collapsed .nav-glyph { color: #a5afbd; }
+  .sidebar.ux-sidebar-collapsed .sidebar-footer { padding-inline: 10px; }
+  .sidebar.ux-sidebar-collapsed .system-pill {
+    min-height: 40px;
+    justify-content: center;
+    padding: 8px;
+  }
+  .sidebar.ux-sidebar-collapsed .user-card {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  .sidebar.ux-sidebar-collapsed .user-card .quiet {
+    width: 34px;
+    min-height: 34px;
+    overflow: hidden;
+    font-size: 0;
+    text-align: center;
+  }
+  .sidebar.ux-sidebar-collapsed .user-card .quiet::before {
+    content: '↪';
+    font-size: 17px;
+  }
+}
+
+.ux-help-link {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  margin-top: 8px;
+  padding: 7px 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, .018);
+  text-align: left;
+}
+.ux-help-link:hover { color: var(--text); border-color: var(--control-line); background: rgba(255, 255, 255, .04); }
+.ux-help-link > span {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-light);
+  background: var(--accent-soft);
+  font-weight: 900;
+}
+.ux-help-link strong { font-size: 12px; }
+
+/* Contextual help keeps each screen understandable without a training course. */
+.ux-context-guide {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+  margin: -10px 0 22px;
+  border: 1px solid var(--ux-guide-line);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  background: var(--ux-guide-bg);
+}
+.ux-guide-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #07111f;
+  background: var(--info);
+  font-weight: 900;
+}
+.ux-context-guide > div:last-child { min-width: 0; }
+.ux-context-guide strong { font-size: 14px; }
+.ux-context-guide p { margin: 3px 0 10px; color: var(--muted); font-size: 13px; }
+.ux-guide-steps { display: flex; flex-wrap: wrap; gap: 7px; }
+.ux-guide-steps span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 99px;
+  padding: 5px 9px;
+  color: #cdd3dc;
+  background: rgba(255, 255, 255, .025);
+  font-size: 12px;
+}
+.ux-guide-steps b {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-light);
+  background: var(--accent-soft);
+  font-size: 11px;
+}
+
+.ux-quick-start { margin-bottom: 22px; padding: 20px; }
+.ux-quick-start > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.ux-quick-start > header h2 { margin-bottom: 4px; }
+.ux-quick-start > header p:not(.eyebrow) { margin: 0; color: var(--muted); font-size: 13px; }
+.ux-quick-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ux-quick-actions > button {
+  min-width: 0;
+  min-height: 92px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 13px;
+  color: inherit;
+  background: var(--surface-2);
+  text-align: left;
+}
+.ux-quick-actions > button:hover { border-color: var(--accent); background: rgba(230, 104, 33, .06); }
+.ux-quick-actions > button > b {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: #1b0d06;
+  background: var(--accent);
+  font-size: 12px;
+}
+.ux-quick-actions > button > span { min-width: 0; display: grid; gap: 3px; }
+.ux-quick-actions strong { font-size: 13px; }
+.ux-quick-actions small { color: var(--muted); font-size: 12px; }
+
+/* Tables: one predictable horizontal scroll model and client-side pagination. */
+.panel.table-wrap,
+.table-wrap.ux-scroll-region {
+  max-width: 100%;
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+  outline: none;
+}
+.table-wrap.ux-scroll-region:focus-visible { box-shadow: 0 0 0 3px rgba(230, 104, 33, .18); }
+.table-wrap::-webkit-scrollbar,
+.kanban-board::-webkit-scrollbar,
+.sidebar nav::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.detail-drawer::-webkit-scrollbar { width: 10px; height: 10px; }
+.table-wrap::-webkit-scrollbar-thumb,
+.kanban-board::-webkit-scrollbar-thumb,
+.sidebar nav::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb,
+.detail-drawer::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 99px;
+  background: #485160;
+  background-clip: padding-box;
+}
+.table-wrap::-webkit-scrollbar-track,
+.kanban-board::-webkit-scrollbar-track { background: rgba(255, 255, 255, .025); }
+
+.ux-scroll-hint {
+  display: none;
+  margin: 7px 2px 0;
+  color: var(--muted-2);
+  font-size: 12px;
+}
+.ux-table-pagination {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  padding: 9px 12px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+}
+.ux-table-pagination + .ux-scroll-hint,
+.ux-scroll-hint + .ux-table-pagination { margin-top: 8px; }
+.ux-table-pagination > div { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.ux-table-pagination label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+.ux-table-pagination select { width: auto; min-width: 70px; min-height: 38px; }
+.ux-table-pagination .secondary { min-height: 38px; padding-inline: 11px; }
+.ux-table-pagination .secondary:disabled { cursor: not-allowed; opacity: .42; transform: none; }
+.ux-page-number { min-width: 52px; color: var(--text); text-align: center; font-weight: 750; }
+
+/* Large overlays should never trap content below the viewport. */
+.modal-card {
+  max-height: min(90dvh, 920px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden !important;
+}
+.modal-card > .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.detail-drawer {
+  max-height: 100dvh;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.plan-modal .permission-groups { min-width: 0; }
+
+/* Horizontal work areas are explicit instead of looking cut off. */
+.kanban-board.ux-horizontal-region {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-gutter: stable;
+  outline: none;
+}
+.kanban-board.ux-horizontal-region:focus-visible { box-shadow: 0 0 0 3px rgba(230, 104, 33, .18); }
+.kanban-board.ux-horizontal-region > .kanban-lane { scroll-snap-align: start; }
+
+/* Stronger hierarchy and safer wrapping for dense blocks. */
+.page-header > div:first-child { min-width: 0; }
+.summary-strip > div { min-width: 0; }
+.summary-strip strong { white-space: normal; overflow-wrap: anywhere; }
+.panel-heading > div { min-width: 0; }
+.data-toolbar { max-width: 100%; flex-wrap: wrap; }
+.data-toolbar .search-field { flex: 1 1 280px; }
+.data-toolbar .result-count { white-space: nowrap; }
+.customer-cell strong, .customer-cell small { max-width: min(240px, 28vw); }
+
+@media (max-width: 1180px) {
+  .ux-sidebar-toggle { display: none !important; }
+  .ux-scroll-hint { display: block; }
+  .ux-quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  .ux-context-guide { grid-template-columns: 30px minmax(0, 1fr); padding: 12px; }
+  .ux-guide-icon { width: 30px; height: 30px; border-radius: 8px; }
+  .ux-guide-steps { display: grid; grid-template-columns: 1fr; }
+  .ux-quick-start { padding: 16px; }
+  .ux-quick-actions { grid-template-columns: 1fr 1fr; }
+  .ux-table-pagination { align-items: stretch; flex-direction: column; }
+  .ux-table-pagination > div { justify-content: space-between; flex-wrap: wrap; }
+  .modal-card { max-height: 94dvh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+}
+
+@media (max-width: 560px) {
+  .ux-context-guide { margin-top: -4px; }
+  .ux-quick-actions { grid-template-columns: 1fr; }
+  .ux-table-pagination > div { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .ux-table-pagination label { grid-column: 1 / -1; justify-content: space-between; }
+  .ux-page-number { order: -1; grid-column: 1 / -1; width: 100%; }
+  .ux-table-pagination .secondary { width: 100%; }
+}
