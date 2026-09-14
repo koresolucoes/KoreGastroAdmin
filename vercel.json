@@ -1,8 +1,10 @@
 {
   "version": 2,
   "rewrites": [
+    { "source": "/api/admin/health", "destination": "/api/admin/health-composite" },
+    { "source": "/api/v2/admin/health", "destination": "/api/admin/health-composite" },
     { "source": "/api/v2/admin/:path*", "destination": "/api/admin/:path*" },
-    { "source": "/api/v2/health", "destination": "/api/admin/health" },
+    { "source": "/api/v2/health", "destination": "/api/admin/health-composite" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [
