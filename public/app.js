@@ -6,7 +6,7 @@
   const authHash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
   const inviteToken = authHash.get('type') === 'invite' ? authHash.get('access_token') : '';
   const ROUTE_PATHS = Object.freeze({
-    overview: 'inicio', mywork: 'minha-fila', workboard: 'kanban', tenants: 'clientes', support: 'suporte',
+    overview: 'inicio', ifoodRequests: 'solicitacoes-ifood', mywork: 'minha-fila', workboard: 'kanban', tenants: 'clientes', support: 'suporte',
     beta: 'beta', subscriptions: 'assinaturas', plans: 'planos', catalog: 'cardapios',
     administrators: 'equipe', logs: 'auditoria', health: 'saude', provision: 'novo-cliente'
   });
@@ -32,6 +32,7 @@
     plans: [],
     permissionCatalog: [],
     tickets: null,
+    ifoodRequests: null,
     ticketSummary: null,
     ticketMeta: null,
     menu: [],
@@ -73,7 +74,7 @@
       ['overview', 'Início', '⌂'], ['mywork', 'Minha fila', '✓'], ['workboard', 'Kanban', '▦']
     ] },
     { label: 'Relacionamento', items: [
-      ['tenants', 'Clientes', '◫'], ['support', 'Suporte', '✦'], ['beta', 'Programa beta', '★']
+      ['tenants', 'Clientes', '◫'], ['support', 'Suporte', '✦'], ['ifoodRequests', 'Conexões iFood', '↗'], ['beta', 'Programa beta', '★']
     ] },
     { label: 'Receita', items: [
       ['subscriptions', 'Assinaturas', '◎'], ['plans', 'Planos', '◇']
@@ -91,7 +92,7 @@
   };
   const SECTION_CAPABILITIES = Object.freeze({
     overview: ['dashboard.read'], mywork: ['dashboard.read'], workboard: ['dashboard.read'],
-    tenants: ['customers.read'], support: ['support.read'], beta: ['beta.read'],
+    tenants: ['customers.read'], support: ['support.read'], ifoodRequests: ['support.read'], beta: ['beta.read'],
     subscriptions: ['subscriptions.read'], plans: ['plans.read'], catalog: ['catalog.read'],
     provision: ['onboarding.manage'], administrators: ['access.read'], logs: ['audit.read'], health: ['health.read']
   });
@@ -504,6 +505,7 @@
   }
 
   async function loadSection(section = state.section, force = false) {
+    if (section === 'ifoodRequests' && (force || !state.ifoodRequests)) state.ifoodRequests = await api('/api/admin/ifood-requests');
     if (section === 'support' && (force || !state.tickets)) {
       const tickets = await api('/api/admin/tickets');
       state.tickets = tickets.data || [];
@@ -1032,8 +1034,38 @@
     </section>`;
   }
 
+  function ifoodRequests() {
+    const payload = state.ifoodRequests || {};
+    const rows = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.requests) ? payload.requests : [];
+    const active = rows.filter((item) => !['CONNECTED', 'REJECTED', 'CANCELLED'].includes(item.status));
+    const statusLabel = {
+      SUBMITTED: 'Recebida',
+      ACCESS_REQUESTED: 'Acesso solicitado',
+      WAITING_MERCHANT_APPROVAL: 'Aguardando aprovação iFood',
+      APPROVED_PENDING_VERIFICATION: 'Aprovada, falta validar',
+      CONNECTED: 'Conectada',
+      NEEDS_INFORMATION: 'Aguardando informações',
+      REJECTED: 'Recusada',
+      CANCELLED: 'Cancelada'
+    };
+    return `<section class="page">
+      ${pageHeader('INTEGRAÇÕES', 'Conexões iFood', 'Acompanhe as solicitações e valide a associação da conta de cada restaurante.', `<button class="secondary" data-action="reload-ifood-requests">↻ Atualizar fila</button>`)}
+      <div class="support-kpis"><div><span>SOLICITAÇÕES</span><strong>${rows.length}</strong><small>no total</small></div><div><span>EM ANDAMENTO</span><strong>${active.length}</strong><small>aguardando conclusão</small></div><div><span>CONECTADAS</span><strong>${rows.filter((item) => item.status === 'CONNECTED').length}</strong><small>contas validadas</small></div></div>
+      <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Restaurante</th><th>CNPJ</th><th>Solicitada em</th><th>Status</th><th>Merchant ID</th><th>Ações</th></tr></thead><tbody>
+      ${rows.length ? rows.map((item) => {
+        const id = escape(item.id || '');
+        const status = String(item.status || 'SUBMITTED');
+        const connected = status === 'CONNECTED';
+        return `<tr><td><strong>${escape(item.store_name || item.storeName || 'Restaurante')}</strong></td><td>${escape(item.store_cnpj || item.storeCnpj || '—')}</td><td>${escape(date(item.created_at || item.createdAt))}</td><td><span class="status-pill">${escape(statusLabel[status] || status)}</span></td><td>${escape(item.verified_merchant_id || item.verifiedMerchantId || '—')}</td><td><div class="header-actions">
+          ${!connected && status !== 'REJECTED' ? `<button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="ACCESS_REQUESTED">Solicitar acesso</button><button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="WAITING_MERCHANT_APPROVAL">Aguardar aprovação</button><button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="NEEDS_INFORMATION">Pedir informação</button><button class="secondary" data-action="ifood-request-connect" data-id="${id}">Validar merchantId</button><button class="danger" data-action="ifood-request-status" data-id="${id}" data-status="REJECTED">Recusar</button>` : '—'}
+        </div></td></tr>`;
+      }).join('') : `<tr><td colspan="6"><div class="empty-state"><strong>Nenhuma solicitação iFood</strong><p>As solicitações feitas pelos restaurantes aparecerão aqui.</p></div></td></tr>`}
+      </tbody></table></div></div>
+    </section>`;
+  }
+
   function activePage() {
-    const pages = { overview, mywork: workboard, workboard, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
+    const pages = { overview, ifoodRequests, mywork: workboard, workboard, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
     return (pages[state.section] || overview)();
   }
 
@@ -1561,6 +1593,27 @@
     if (action === 'ticket-filter') { state.filters.ticketStatus = target.dataset.value; render(); return; }
     if (action === 'select-ticket') { state.selectedTicketId = target.dataset.id; render(); return; }
     if (action === 'open-ticket') { state.selectedTicketId = target.dataset.id; return openSection('support'); }
+    if (action === 'reload-ifood-requests') return withPending('reload-ifood-requests', target, async () => { await loadSection('ifoodRequests', true); render(); });
+    if (action === 'ifood-request-status') {
+      return withPending(`ifood-request:${target.dataset.id}`, target, async () => {
+        await api('/api/admin/ifood-requests', { method: 'POST', body: { action: 'adminUpdate', requestId: target.dataset.id, status: target.dataset.status } });
+        state.ifoodRequests = null;
+        await loadSection('ifoodRequests', true);
+        render();
+        showNotice('Solicitação iFood atualizada e registrada na auditoria.');
+      });
+    }
+    if (action === 'ifood-request-connect') {
+      const merchantId = window.prompt('Informe o merchantId confirmado na conta do iFood:');
+      if (!merchantId) return;
+      return withPending(`ifood-connect:${target.dataset.id}`, target, async () => {
+        await api('/api/admin/ifood-requests', { method: 'POST', body: { action: 'adminConnect', requestId: target.dataset.id, merchantId: merchantId.trim() } });
+        state.ifoodRequests = null;
+        await loadSection('ifoodRequests', true);
+        render();
+        showNotice('Conta iFood validada e conexão registrada.');
+      });
+    }
     if (action === 'reload-tickets') return withPending('reload-tickets', target, async () => { await loadSection('support', true); render(); });
     if (action === 'reload-workboard') return withPending('reload-workboard', target, async () => { await loadSection('workboard', true); render(); });
     if (action === 'resolve-ticket') {
