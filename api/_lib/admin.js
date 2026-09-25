@@ -13,7 +13,7 @@ export const ROLE_DEFINITIONS = Object.freeze({
     description: 'Opera toda a plataforma, exceto o limite de segurança do proprietário.',
     capabilities: [
       'dashboard.read', 'customers.read', 'subscriptions.read', 'subscriptions.manage',
-      'support.read', 'support.manage', 'plans.read', 'plans.manage', 'catalog.read',
+      'support.read', 'support.manage', 'ifood.manage', 'plans.read', 'plans.manage', 'catalog.read',
       'catalog.manage', 'onboarding.manage', 'health.read', 'health.run', 'audit.read',
       'audit.export', 'access.read', 'access.manage', 'beta.read', 'beta.manage'
     ]
@@ -26,7 +26,7 @@ export const ROLE_DEFINITIONS = Object.freeze({
   support: {
     label: 'Suporte',
     description: 'Clientes, chamados e contexto de assinaturas.',
-    capabilities: ['dashboard.read', 'customers.read', 'subscriptions.read', 'support.read', 'support.manage', 'health.read', 'audit.read', 'beta.read', 'beta.manage']
+    capabilities: ['dashboard.read', 'customers.read', 'subscriptions.read', 'support.read', 'support.manage', 'ifood.manage', 'health.read', 'audit.read', 'beta.read', 'beta.manage']
   },
   auditor: {
     label: 'Auditor',
@@ -41,6 +41,7 @@ const ROUTE_CAPABILITIES = Object.freeze({
   restaurants: { GET: 'customers.read' },
   subscriptions: { GET: 'subscriptions.read', POST: 'subscriptions.manage', PUT: 'subscriptions.manage', DELETE: 'subscriptions.manage' },
   tickets: { GET: 'support.read', POST: 'support.manage', PUT: 'support.manage' },
+  'ifood-requests': { GET: 'support.read', POST: 'ifood.manage' },
   messages: { POST: 'support.manage' },
   plans: { GET: 'plans.read', POST: 'plans.manage', PUT: 'plans.manage', DELETE: 'plans.manage' },
   'tenant-menu': { GET: 'catalog.read', POST: 'catalog.manage', PUT: 'catalog.manage', DELETE: 'catalog.manage' },
