@@ -1049,15 +1049,16 @@
       CANCELLED: 'Cancelada'
     };
     return `<section class="page">
-      ${pageHeader('INTEGRAÇÕES', 'Conexões iFood', 'Acompanhe as solicitações e valide a associação da conta de cada restaurante.', `<button class="secondary" data-action="reload-ifood-requests">↻ Atualizar fila</button>`)}
+      ${pageHeader('INTEGRAÇÕES', 'Conexões iFood', 'Confira o Merchant ID informado, confirme a aprovação do responsável no iFood e ative a associação manualmente.', `<button class="secondary" data-action="reload-ifood-requests">↻ Atualizar fila</button>`)}
       <div class="support-kpis"><div><span>SOLICITAÇÕES</span><strong>${rows.length}</strong><small>no total</small></div><div><span>EM ANDAMENTO</span><strong>${active.length}</strong><small>aguardando conclusão</small></div><div><span>CONECTADAS</span><strong>${rows.filter((item) => item.status === 'CONNECTED').length}</strong><small>contas validadas</small></div></div>
       <div class="panel table-panel"><div class="table-scroll"><table><thead><tr><th>Restaurante</th><th>CNPJ</th><th>Solicitada em</th><th>Status</th><th>Merchant ID</th><th>Ações</th></tr></thead><tbody>
       ${rows.length ? rows.map((item) => {
         const id = escape(item.id || '');
         const status = String(item.status || 'SUBMITTED');
-        const connected = status === 'CONNECTED';
-        return `<tr><td><strong>${escape(item.store_name || item.storeName || 'Restaurante')}</strong></td><td>${escape(item.store_cnpj || item.storeCnpj || '—')}</td><td>${escape(date(item.created_at || item.createdAt))}</td><td><span class="status-pill">${escape(statusLabel[status] || status)}</span></td><td>${escape(item.verified_merchant_id || item.verifiedMerchantId || '—')}</td><td><div class="header-actions">
-          ${!connected && status !== 'REJECTED' ? `<button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="ACCESS_REQUESTED">Solicitar acesso</button><button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="WAITING_MERCHANT_APPROVAL">Aguardar aprovação</button><button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="NEEDS_INFORMATION">Pedir informação</button><button class="secondary" data-action="ifood-request-connect" data-id="${id}">Validar merchantId</button><button class="danger" data-action="ifood-request-status" data-id="${id}" data-status="REJECTED">Recusar</button>` : '—'}
+        const closed = ['CONNECTED', 'REJECTED', 'CANCELLED'].includes(status);
+        const claimedMerchantId = String(item.claimed_merchant_id || item.claimedMerchantId || '');
+        return `<tr><td><strong>${escape(item.store_name || item.storeName || 'Restaurante')}</strong></td><td>${escape(item.store_cnpj || item.storeCnpj || '—')}</td><td>${escape(date(item.created_at || item.createdAt))}</td><td><span class="status-pill">${escape(statusLabel[status] || status)}</span></td><td>${escape(item.verified_merchant_id || item.verifiedMerchantId || claimedMerchantId || '—')}</td><td><div class="header-actions">
+          ${!closed ? `<button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="ACCESS_REQUESTED">Solicitar acesso</button><button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="WAITING_MERCHANT_APPROVAL">Aguardar aprovação</button><button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="APPROVED_PENDING_VERIFICATION">Aprovação recebida</button><button class="secondary" data-action="ifood-request-status" data-id="${id}" data-status="NEEDS_INFORMATION">Pedir informação</button>${status === 'APPROVED_PENDING_VERIFICATION' ? `<button class="secondary" data-action="ifood-request-connect" data-id="${id}" data-merchant-id="${escape(claimedMerchantId)}">Confirmar e conectar</button>` : ''}<button class="danger" data-action="ifood-request-status" data-id="${id}" data-status="REJECTED">Recusar</button>` : '—'}
         </div></td></tr>`;
       }).join('') : `<tr><td colspan="6"><div class="empty-state"><strong>Nenhuma solicitação iFood</strong><p>As solicitações feitas pelos restaurantes aparecerão aqui.</p></div></td></tr>`}
       </tbody></table></div></div>
@@ -1608,10 +1609,17 @@
       });
     }
     if (action === 'ifood-request-connect') {
-      const merchantId = window.prompt('Informe o merchantId confirmado na conta do iFood:');
-      if (!merchantId) return;
+      const expectedMerchantId = String(target.dataset.merchantId || '').trim();
+      const merchantId = window.prompt('Confirme o Merchant ID informado pela loja:', expectedMerchantId);
+      if (!merchantId?.trim()) return;
+      if (expectedMerchantId && merchantId.trim().toLowerCase() !== expectedMerchantId.toLowerCase()) {
+        showNotice('O Merchant ID deve corresponder ao informado pelo restaurante. Peça a correção pelo chamado se estiver diferente.');
+        return;
+      }
+      const authorizationConfirmed = window.confirm('Confirma que o responsável desta loja aprovou o acesso do ChefOS no Portal do Parceiro iFood?');
+      if (!authorizationConfirmed) return;
       return withPending(`ifood-connect:${target.dataset.id}`, target, async () => {
-        await api('/api/admin/ifood-requests', { method: 'POST', body: { action: 'adminConnect', requestId: target.dataset.id, merchantId: merchantId.trim() } });
+        await api('/api/admin/ifood-requests', { method: 'POST', body: { action: 'adminConnect', requestId: target.dataset.id, merchantId: merchantId.trim(), authorizationConfirmed: true } });
         state.ifoodRequests = null;
         await loadSection('ifoodRequests', true);
         render();
