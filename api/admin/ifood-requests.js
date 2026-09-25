@@ -58,10 +58,12 @@ export default async function handler(req, res) {
     if (action === 'adminUpdate') {
       const status = cleanText(payload.status, 48);
       assert(ALLOWED_STATUSES.has(status), 'Status inválido.');
-      forwarded = { action, requestId, status };
+      const message = cleanText(payload.message, 1200);
+      assert(status !== 'NEEDS_INFORMATION' || message, 'Informe ao restaurante quais dados estão pendentes.');
+      forwarded = { action, requestId, status, ...(message ? { message } : {}) };
     } else if (action === 'adminConnect') {
       const merchantId = cleanText(payload.merchantId, 180);
-      assert(merchantId.length >= 3, 'Informe o merchantId validado no portal do iFood.');
+      assertUuid(merchantId, 'merchantId');
       forwarded = { action, requestId, merchantId };
     } else {
       assert(false, 'Ação administrativa inválida.');
