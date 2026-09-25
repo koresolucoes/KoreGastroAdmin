@@ -64,7 +64,8 @@ export default async function handler(req, res) {
     } else if (action === 'adminConnect') {
       const merchantId = cleanText(payload.merchantId, 180);
       assertUuid(merchantId, 'merchantId');
-      forwarded = { action, requestId, merchantId };
+      assert(payload.authorizationConfirmed === true, 'Confirme a aprovação do responsável no Portal do Parceiro iFood.');
+      forwarded = { action, requestId, merchantId, authorizationConfirmed: true };
     } else {
       assert(false, 'Ação administrativa inválida.');
     }
@@ -79,7 +80,8 @@ export default async function handler(req, res) {
       targetId: requestId,
       requestId,
       status: forwarded.status || 'CONNECTED',
-      merchantId: forwarded.merchantId || undefined
+      merchantId: forwarded.merchantId || undefined,
+      authorizationConfirmed: forwarded.authorizationConfirmed || undefined
     });
     return reply(res, 200, result);
   } catch (error) {
