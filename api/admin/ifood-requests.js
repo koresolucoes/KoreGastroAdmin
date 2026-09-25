@@ -29,7 +29,9 @@ async function centralRequest(path, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload.error || 'A API central recusou a operação.');
+    const detail = payload.error;
+    const message = typeof detail === 'string' ? detail : detail?.message || payload.message || 'A API central recusou a operação.';
+    const error = new Error(message);
     error.status = response.status;
     throw error;
   }
@@ -42,7 +44,7 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const result = await centralRequest('/api/ifood-integration-requests?action=adminList', { token: context.token });
+      const result = await centralRequest('/api/ifood-integration-requests', { method: 'POST', token: context.token, body: { action: 'adminList' } });
       return reply(res, 200, result);
     }
     if (req.method !== 'POST') return reply(res, 405, { error: 'Método não permitido.' });
