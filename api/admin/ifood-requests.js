@@ -9,7 +9,7 @@ import {
   cleanText
 } from '../_lib/admin.js';
 
-const API_BASE = (process.env.CHEFOS_API_URL || 'https://api.chefos.online').replace(/\\/$/, '');
+const API_BASE = (process.env.CHEFOS_API_URL || 'https://api.chefos.online').replace(/\/$/, '');
 const ALLOWED_STATUSES = new Set([
   'ACCESS_REQUESTED',
   'WAITING_MERCHANT_APPROVAL',
