@@ -1595,8 +1595,12 @@
     if (action === 'open-ticket') { state.selectedTicketId = target.dataset.id; return openSection('support'); }
     if (action === 'reload-ifood-requests') return withPending('reload-ifood-requests', target, async () => { await loadSection('ifoodRequests', true); render(); });
     if (action === 'ifood-request-status') {
+      const message = target.dataset.status === 'NEEDS_INFORMATION'
+        ? window.prompt('Descreva quais informações o restaurante precisa enviar:')
+        : '';
+      if (target.dataset.status === 'NEEDS_INFORMATION' && !message?.trim()) return;
       return withPending(`ifood-request:${target.dataset.id}`, target, async () => {
-        await api('/api/admin/ifood-requests', { method: 'POST', body: { action: 'adminUpdate', requestId: target.dataset.id, status: target.dataset.status } });
+        await api('/api/admin/ifood-requests', { method: 'POST', body: { action: 'adminUpdate', requestId: target.dataset.id, status: target.dataset.status, ...(message ? { message: message.trim() } : {}) } });
         state.ifoodRequests = null;
         await loadSection('ifoodRequests', true);
         render();
