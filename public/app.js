@@ -7,7 +7,7 @@
   const inviteToken = authHash.get('type') === 'invite' ? authHash.get('access_token') : '';
   const ROUTE_PATHS = Object.freeze({
     overview: 'inicio', ifoodRequests: 'solicitacoes-ifood', mywork: 'minha-fila', workboard: 'kanban', tenants: 'clientes', support: 'suporte',
-    beta: 'beta', subscriptions: 'assinaturas', plans: 'planos', catalog: 'cardapios',
+    integrations: 'integracoes', beta: 'beta', subscriptions: 'assinaturas', plans: 'planos', catalog: 'cardapios',
     administrators: 'equipe', logs: 'auditoria', health: 'saude', provision: 'novo-cliente'
   });
   const PATH_SECTIONS = Object.fromEntries(Object.entries(ROUTE_PATHS).map(([section, path]) => [path, section]));
@@ -33,6 +33,10 @@
     permissionCatalog: [],
     tickets: null,
     ifoodRequests: null,
+    integrations: null,
+    integrationMeta: null,
+    billing: null,
+    billingError: null,
     ticketSummary: null,
     ticketMeta: null,
     menu: [],
@@ -61,7 +65,7 @@
     sidebarOpen: false,
     globalQuery: '',
     filters: {
-      customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active',
+      integration: '', customer: '', subscription: '', subscriptionStatus: 'all', ticket: '', ticketStatus: 'active',
       catalog: '', catalogCategory: 'all', catalogStatus: 'all', auditQuery: '', auditCategory: 'all',
       auditOutcome: 'all', auditActor: '', auditFrom: '', auditTo: '', auditPage: 1,
       betaQuery: '', betaStatus: 'all', betaAttention: 'all', workQuery: '', workOwner: 'all'
@@ -70,6 +74,8 @@
   let draggedWorkKey = '';
   let searchTimer = 0;
 
+  const NAV_ICON_PATHS = {"overview":"M3 10l9-7 9 7v11H3z M9 21v-8h6v8","mywork":"M9 5h12 M9 12h12 M9 19h12 M3 5h1 M3 12h1 M3 19h1","workboard":"M3 3h5v18H3z M10 3h5v12h-5z M17 3h4v16h-4z","tenants":"M4 21V7l8-4 8 4v14 M8 10h1 M15 10h1 M8 14h1 M15 14h1 M10 21v-4h4v4","support":"M4 14v-2a8 8 0 0 1 16 0v2 M4 12H2v6h4v-6z M20 12h2v6h-4v-6z M18 18v3h-6","ifoodRequests":"M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-4 4a5 5 0 0 0 7 7l2-2","beta":"M9 3h6 M10 3v6L4 19v2h16v-2L14 9V3 M7 15h10","subscriptions":"M3 5h18v14H3z M3 9h18 M7 15h4","plans":"M3 3h8l10 10-8 8L3 11z M7 7h.01","catalog":"M3 4h7v17H3z M14 4h7v17h-7z M6 8h1 M17 8h1 M6 12h1 M17 12h1","integrations":"M8 3v5 M16 3v5 M5 8h14v5a7 7 0 0 1-14 0z M12 20v3","administrators":"M4 21v-3a6 6 0 0 1 12 0v3 M10 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M17 4a4 4 0 0 1 0 7 M19 15a5 5 0 0 1 3 5","logs":"M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5","health":"M2 12h5l3-8 4 16 3-8h5"};
+  const navIcon = (key) => '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + (NAV_ICON_PATHS[key] || NAV_ICON_PATHS.integrations) + '"/></svg>';
   const navigation = [
     { label: 'Trabalho', items: [
       ['overview', 'Início', '⌂'], ['mywork', 'Minha fila', '✓'], ['workboard', 'Kanban', '▦']
@@ -81,7 +87,7 @@
       ['subscriptions', 'Assinaturas', '◎'], ['plans', 'Planos', '◇']
     ] },
     { label: 'Produto', items: [
-      ['catalog', 'Cardápios', '≡']
+      ['integrations', 'Integrações', '↗'], ['catalog', 'Cardápios', '≡']
     ] },
     { label: 'Administração', items: [
       ['administrators', 'Equipe e acessos', '⚙'], ['logs', 'Auditoria', '≋'], ['health', 'Saúde do sistema', '♥']
@@ -93,7 +99,7 @@
   };
   const SECTION_CAPABILITIES = Object.freeze({
     overview: ['dashboard.read'], mywork: ['dashboard.read'], workboard: ['dashboard.read'],
-    tenants: ['customers.read'], support: ['support.read'], ifoodRequests: ['support.read'], beta: ['beta.read'],
+    integrations: ['customers.read'], tenants: ['customers.read'], support: ['support.read'], ifoodRequests: ['support.read'], beta: ['beta.read'],
     subscriptions: ['subscriptions.read'], plans: ['plans.read'], catalog: ['catalog.read'],
     provision: ['onboarding.manage'], administrators: ['access.read'], logs: ['audit.read'], health: ['health.read']
   });
@@ -112,6 +118,11 @@
   const permissionDefinition = (key) => permissionDefinitions().find((permission) => permission.key === key);
   const permissionLabel = (key) => permissionDefinition(key)?.name || 'Acesso adicional';
   const subscriptionOf = (tenant) => tenant?.subscription || tenant?.subscriptions?.[0] || null;
+  const customerAccess = (tenant) => {
+    const operations = tenant.stores || [];
+    const active = operations.filter((store) => (store.subscription || store.subscriptions?.[0])?.entitlementActive).length;
+    return '<span class="read-only-label">' + active + ' de ' + operations.length + ' operação(ões) com acesso</span>';
+  };
   const initials = (value = '') => value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'C';
   const normalize = (value = '') => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const includes = (haystack, needle) => normalize(haystack).includes(normalize(needle));
@@ -254,6 +265,8 @@
 
   function betaNeedsAttention(application) {
     if (['converted', 'closed'].includes(application?.status)) return false;
+    const participant = Array.isArray(application?.participant) ? application.participant[0] : application?.participant;
+    if (application?.status === 'active' && (!participant?.store_id || !participant?.subscription_id)) return true;
     const reference = betaLatestEvent(application)?.created_at || application?.updated_at || application?.submitted_at;
     return reference && Date.now() - new Date(reference).getTime() >= 3 * DAY_MS;
   }
@@ -265,6 +278,7 @@
   }
 
   function betaParticipantHealthSignal(participant) {
+    if (participant?.status === 'active' && (!participant.store_id || !participant.subscription_id)) return '<span class="health-signal warning"><i></i>Revisar vínculo da operação</span>';
     if (!participant?.activated_at) return '<span class="health-signal warning"><i></i>Aguardando ativação</span>';
     const remaining = betaRemainingDays(participant);
     if (remaining === null) return '<span class="health-signal warning"><i></i>Sem data de encerramento</span>';
@@ -358,7 +372,7 @@
   async function startMfaEnrollment() {
     const enrolled = await authRequest('/factors', {
       method: 'POST',
-      body: { factor_type: 'totp', friendly_name: 'ChefOS Control Center', issuer: 'ChefOS' }
+      body: { factor_type: 'totp', friendly_name: 'ChefOS Admin ChefOS', issuer: 'ChefOS' }
     });
     const qrCode = enrolled.totp?.qr_code || '';
     state.mfaMode = {
@@ -448,7 +462,7 @@
       });
     } finally {
       sessionStorage.removeItem('koregastro_admin_token');
-      Object.assign(state, { token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', selectedTicketId: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null, betaApplications: null, betaSummary: null, betaTransitions: null, workCards: null, workMeta: null, modal: null, modalDirty: false, modalReturn: null, pageDirty: false, pendingAction: '', sectionLoading: '', sectionError: null, sidebarOpen: false, globalQuery: '', notice: null });
+      Object.assign(state, { integrations: null, integrationMeta: null, billing: null, billingError: null, ifoodRequests: null, token: '', inviteMode: false, mfaMode: null, user: null, dashboard: null, tenants: [], customerSummary: null, customerMeta: null, plans: [], permissionCatalog: [], tickets: null, ticketSummary: null, ticketMeta: null, menu: [], menuCategories: [], menuMeta: null, selectedTenant: '', selectedStore: '', selectedTicketId: '', admins: null, adminSummary: null, adminRoles: [], adminMeta: null, health: null, logs: null, betaApplications: null, betaSummary: null, betaTransitions: null, workCards: null, workMeta: null, modal: null, modalDirty: false, modalReturn: null, pageDirty: false, pendingAction: '', sectionLoading: '', sectionError: null, sidebarOpen: false, globalQuery: '', notice: null });
       render();
     }
   }
@@ -506,6 +520,15 @@
   }
 
   async function loadSection(section = state.section, force = false) {
+    if (section === 'integrations' && (force || !state.integrations)) {
+      const result = await api('/api/admin/integrations');
+      state.integrations = result.data || [];
+      state.integrationMeta = result.meta || {};
+      if (can('subscriptions.read')) {
+        try { state.billing = await api('/api/admin/billing'); state.billingError = null; }
+        catch (error) { state.billing = null; state.billingError = error.message; }
+      }
+    }
     if (section === 'ifoodRequests' && (force || !state.ifoodRequests)) state.ifoodRequests = await api('/api/admin/ifood-requests');
     if (section === 'support' && (force || !state.tickets)) {
       const tickets = await api('/api/admin/tickets');
@@ -601,26 +624,26 @@
 
   function loginView() {
     return `<section class="login-shell">
-      <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><strong>ChefOS</strong><small>Control Center</small></div>
+      <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><strong>ChefOS</strong><small>Painel administrativo</small></div>
       <form class="login-card" data-form="login">${authNotice()}
         <p class="eyebrow">ACESSO ADMINISTRATIVO</p>
-        <h1>Bem-vindo ao centro de comando.</h1>
+        <h1>Sua operação, bem acompanhada.</h1>
         <p class="muted">Gerencie toda a operação ChefOS com uma conta autorizada.</p>
         <label>E-mail<input type="email" name="email" autocomplete="email" placeholder="admin@chefos.online" required /></label>
         <label>Senha<input type="password" name="password" autocomplete="current-password" placeholder="Sua senha" required /></label>
-        <button class="primary wide-button" type="submit">Entrar no Control Center</button>
+        <button class="primary wide-button" type="submit">Entrar no painel</button>
         <small class="secure-note"><i></i>Sessão protegida pelo Supabase</small>
       </form>
     </section>`;
   }
 
   function inviteView() {
-    return `<section class='login-shell invite-acceptance'><div class='login-brand'><span class='brand-mark' aria-hidden='true'></span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card' data-form='invite-password'>${authNotice()}<p class='eyebrow'>CONVITE ADMINISTRATIVO</p><h1>Proteja seu novo acesso.</h1><p class='muted'>Defina uma senha forte para concluir o convite e entrar no centro de controle.</p><label>Nova senha<input name='password' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Mínimo de 10 caracteres' /></label><label>Confirmar senha<input name='confirmation' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Repita a senha' /></label><div class='login-security'><span>✓</span><p><strong>Ativação auditada</strong><small>A conta só será ativada após a confirmação do e-mail.</small></p></div><button class='primary wide-button' type='submit'>Aceitar convite e entrar →</button></form></section>`;
+    return `<section class='login-shell invite-acceptance'><div class='login-brand'><span class='brand-mark' aria-hidden='true'></span><div><strong>ChefOS</strong><small>Admin ChefOS</small></div></div><form class='login-card' data-form='invite-password'>${authNotice()}<p class='eyebrow'>CONVITE ADMINISTRATIVO</p><h1>Proteja seu novo acesso.</h1><p class='muted'>Defina uma senha forte para concluir o convite e entrar no painel.</p><label>Nova senha<input name='password' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Mínimo de 10 caracteres' /></label><label>Confirmar senha<input name='confirmation' type='password' required minlength='10' maxlength='128' autocomplete='new-password' placeholder='Repita a senha' /></label><div class='login-security'><span>✓</span><p><strong>Ativação auditada</strong><small>A conta só será ativada após a confirmação do e-mail.</small></p></div><button class='primary wide-button' type='submit'>Aceitar convite e entrar →</button></form></section>`;
   }
 
   function mfaView() {
     const enrollment = state.mfaMode?.type === 'enroll';
-    return `<section class='login-shell mfa-shell'><div class='login-brand'><span class='brand-mark' aria-hidden='true'></span><div><strong>ChefOS</strong><small>Control Center</small></div></div><form class='login-card mfa-card' data-form='mfa'>${authNotice()}<p class='eyebrow'>SEGUNDO FATOR</p><h1>${enrollment ? 'Proteja sua conta administrativa.' : 'Confirme que é você.'}</h1><p class='muted'>${enrollment ? 'Escaneie o QR Code no Google Authenticator, Microsoft Authenticator, 1Password ou aplicativo compatível.' : 'Abra seu aplicativo autenticador e informe o código atual.'}</p>${enrollment ? `<div class='mfa-setup'><img src='${escape(state.mfaMode.qrCode)}' alt='QR Code para cadastrar o segundo fator' /><div><small>CHAVE MANUAL</small><code>${escape(state.mfaMode.secret)}</code><button type='button' class='text-button' data-action='copy-mfa-secret'>Copiar chave</button></div></div>` : `<div class='mfa-prompt'><span>⌁</span><div><strong>Autenticador cadastrado</strong><small>O código muda a cada 30 segundos.</small></div></div>`}<label>Código de 6 dígitos<input name='code' type='text' inputmode='numeric' autocomplete='one-time-code' required minlength='6' maxlength='6' pattern='[0-9]{6}' placeholder='000000' /></label><button class='primary wide-button' type='submit'>${enrollment ? 'Ativar MFA e entrar →' : 'Verificar e entrar →'}</button><button class='quiet mfa-logout' type='button' data-action='logout'>Sair e usar outra conta</button></form></section>`;
+    return `<section class='login-shell mfa-shell'><div class='login-brand'><span class='brand-mark' aria-hidden='true'></span><div><strong>ChefOS</strong><small>Admin ChefOS</small></div></div><form class='login-card mfa-card' data-form='mfa'>${authNotice()}<p class='eyebrow'>SEGUNDO FATOR</p><h1>${enrollment ? 'Proteja sua conta administrativa.' : 'Confirme que é você.'}</h1><p class='muted'>${enrollment ? 'Escaneie o QR Code no Google Authenticator, Microsoft Authenticator, 1Password ou aplicativo compatível.' : 'Abra seu aplicativo autenticador e informe o código atual.'}</p>${enrollment ? `<div class='mfa-setup'><img src='${escape(state.mfaMode.qrCode)}' alt='QR Code para cadastrar o segundo fator' /><div><small>CHAVE MANUAL</small><code>${escape(state.mfaMode.secret)}</code><button type='button' class='text-button' data-action='copy-mfa-secret'>Copiar chave</button></div></div>` : `<div class='mfa-prompt'><span>⌁</span><div><strong>Autenticador cadastrado</strong><small>O código muda a cada 30 segundos.</small></div></div>`}<label>Código de 6 dígitos<input name='code' type='text' inputmode='numeric' autocomplete='one-time-code' required minlength='6' maxlength='6' pattern='[0-9]{6}' placeholder='000000' /></label><button class='primary wide-button' type='submit'>${enrollment ? 'Ativar MFA e entrar →' : 'Verificar e entrar →'}</button><button class='quiet mfa-logout' type='button' data-action='logout'>Sair e usar outra conta</button></form></section>`;
   }
 
   function missingConfigView() {
@@ -631,7 +654,7 @@
     const visibleGroups = navigation.map((group) => ({ ...group, items: group.items.filter(([key]) => canOpenSection(key)) })).filter((group) => group.items.length);
     const groups = visibleGroups.map((group) => `<div class="nav-group"><span class="nav-label">${group.label}</span>${group.items.map(([key, label, glyph]) => {
       const badge = key === 'support' && (state.dashboard?.openTickets || 0) ? `<b>${state.dashboard.openTickets}</b>` : '';
-      return `<button class="nav-item ${state.section === key ? 'active' : ''}" data-action="section" data-section="${key}" ${state.section === key ? 'aria-current="page"' : ''}><span class="nav-glyph" aria-hidden="true">${glyph}</span><span>${label}</span>${badge}</button>`;
+      return `<button class="nav-item ${state.section === key ? 'active' : ''}" data-action="section" data-section="${key}" ${state.section === key ? 'aria-current="page"' : ''}><span class="nav-glyph" aria-hidden="true">${navIcon(key)}</span><span>${label}</span>${badge}</button>`;
     }).join('')}</div>`).join('');
     const healthState = state.health?.status || 'unknown';
     const healthLabels = {
@@ -641,7 +664,7 @@
     };
     const healthLabel = healthLabels[healthState] || healthLabels.unknown;
     return `<aside class="sidebar ${state.sidebarOpen ? 'open' : ''}" aria-label="Navegação principal">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>ChefOS<small>Control Center</small></span><button class="icon-button sidebar-close" data-action="toggle-sidebar" aria-label="Fechar menu">×</button></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>ChefOS<small>Admin ChefOS</small></span><button class="icon-button sidebar-close" data-action="toggle-sidebar" aria-label="Fechar menu">×</button></div>
       <nav>${groups}</nav>
       <div class="sidebar-footer">
         <div class="system-pill system-${escape(healthState)}"><i></i><span><strong>${healthLabel[0]}</strong><small>${healthLabel[1]}</small></span></div>
@@ -734,22 +757,56 @@
     </section>`;
   }
 
+  function subscriptionRows() {
+    return state.tenants.flatMap((tenant) => (tenant.stores || []).map((store) => ({ tenant, store, subscription: store.subscription || store.subscriptions?.[0] || tenant.subscriptions?.find((item) => (item.storeId || item.user_id) === (store.storeId || store.id)) || {} })))
+      .filter(({tenant, store, subscription}) => (!state.filters.subscription || includes(tenant.full_name + ' ' + tenant.email + ' ' + store.name, state.filters.subscription)) && (state.filters.subscriptionStatus === 'all' || subscription.status === state.filters.subscriptionStatus));
+  }
+
+  function integrations() {
+    const operations = state.integrations || [];
+    const query = state.filters.integration;
+    const visible = operations.filter((operation) => {
+      const tenant = state.tenants.find((item) => (item.accountId || item.id) === operation.ownerId);
+      return !query || includes(operation.name + ' ' + (tenant?.full_name || '') + ' ' + (tenant?.email || ''), query);
+    });
+    const signalCard = (title, item, detail = item.detail) => `<div class="connection-signal signal-${escape(item.state)}"><span class="signal-heading">${title}<i aria-hidden="true"></i></span><strong>${escape(item.label)}</strong><p>${escape(detail)}</p></div>`;
+    const attentionCount = operations.filter((operation) => [operation.access, operation.beta, operation.ifood, operation.cielo, operation.mercadoPago].some((item) => ['attention', 'unknown'].includes(item.state))).length;
+    const connection = state.billing?.connection;
+    const billingPlans = state.billing?.plans || [];
+    return `<section class="page integration-page">
+      ${pageHeader('OPERAÇÕES CONECTADAS', 'Conexões por operação.', 'Confira o acesso, os módulos e as conexões de cada loja — inclusive marcas que compartilham uma dark kitchen.', '<button class="secondary" data-action="refresh-integrations">Atualizar visão</button>')}
+      <div class="summary-strip"><div><span>Operações</span><strong>${operations.length}</strong></div><div><span>Precisam de atenção</span><strong>${attentionCount}</strong></div><div><span>Beta em andamento</span><strong>${operations.filter((item) => item.participant?.status === 'active').length}</strong></div><div><span>Última consulta</span><strong class="summary-date">${date(state.integrationMeta?.verifiedAt)}</strong></div></div>
+      ${state.integrationMeta?.unavailable?.length ? '<div class="modal-alert"><strong>Algumas informações não puderam ser consultadas</strong><p>Os blocos “Não verificado” precisam de uma nova consulta. As demais informações continuam disponíveis.</p></div>' : ''}
+      ${state.integrationMeta?.unlinkedBetaParticipants ? `<div class="modal-alert"><strong>${state.integrationMeta.unlinkedBetaParticipants} participante(s) beta sem operação vinculada</strong><p>Vincule a operação e sua assinatura gratuita antes de considerar o restaurante pronto para testar.</p>${can('beta.read') ? '<button class="text-button" data-action="section" data-section="beta">Revisar participantes →</button>' : ''}</div>` : ''}
+      ${can('subscriptions.read') ? `<section class="panel billing-status"><div><p class="eyebrow">ASSINATURAS DO CHEFOS</p><h2>Cobrança da plataforma</h2><p>Esta conta recebe a mensalidade do ChefOS. As contas de recebimento dos restaurantes aparecem em cada operação abaixo.</p></div><div class="billing-evidence"><strong>${connection ? (connection.connected ? 'Mercado Pago conectado' : 'Revisar conexão Mercado Pago') : 'Conexão não verificada'}</strong><small>${connection ? `${billingPlans.filter((plan) => plan.provider?.valid).length} de ${billingPlans.length} planos recorrentes conferidos no provedor` : 'Atualize a visão para consultar o provedor.'}</small>${connection && !connection.webhookSecretConfigured ? '<small class="danger-text">Confira a configuração de segurança das notificações.</small>' : ''}${billingPlans.some((plan) => !plan.provider?.valid) ? '<button class="text-button" data-action="section" data-section="plans">Revisar planos</button>' : ''}</div></section>` : ''}
+      <div class="data-toolbar"><div class="search-field"><span aria-hidden="true">⌕</span><input data-search="integration" value="${escape(query)}" aria-label="Buscar operação ou cliente" placeholder="Buscar operação ou cliente" /></div><span class="result-count">${visible.length} operação(ões)</span></div>
+      <div class="operations-grid">${visible.map((operation) => {
+        const tenant = state.tenants.find((item) => (item.accountId || item.id) === operation.ownerId);
+        return `<article class="panel operation-card"><header><div><span class="eyebrow">${escape(tenant?.full_name || 'Operação ChefOS')}</span><h2>${escape(operation.name)}</h2><small>${operation.memberships ? `${operation.memberships.active} pessoa(s) com acesso · ${operation.memberships.owners} responsável(is)` : 'Equipe não verificada'}</small></div>${tenant ? `<button class="secondary" data-action="open-tenant" data-id="${tenant.accountId || tenant.id}">Ver cliente</button>` : ''}</header>
+        <div class="connection-grid">${signalCard('Acesso ChefOS', operation.access, operation.access.state === 'ready' ? 'Válido até ' + day(operation.subscription?.periodEnd) + '.' : operation.access.detail)}${signalCard('Programa beta', operation.beta, operation.beta.state === 'ready' ? 'Ciclo gratuito até ' + day(operation.participant?.endsAt) + '.' : operation.beta.detail)}${signalCard('iFood', operation.ifood)}${signalCard('Cielo Smart', operation.cielo)}${signalCard('Recebimentos Mercado Pago', operation.mercadoPago)}<div class="connection-signal signal-${operation.modulesVerified && operation.plan ? 'configured' : 'unknown'}"><span class="signal-heading">Módulos do plano<i aria-hidden="true"></i></span><strong>${escape(operation.plan?.name || 'Plano não definido')}</strong><p>${operation.modulesVerified ? `${operation.plan?.moduleKeys?.length || 0} permissões liberadas pelo plano` : 'Módulos não verificados'}</p>${operation.modulesVerified && operation.plan?.moduleKeys?.length ? `<details class="module-disclosure"><summary>Ver módulos e permissões</summary><ul>${operation.plan.moduleKeys.map((key) => `<li>${escape(permissionLabel(key))}</li>`).join('')}</ul></details>` : ''}</div></div>
+        ${operation.merchants?.length ? `<div class="operation-detail"><strong>Lojas iFood</strong><span>${operation.merchants.map((merchant) => escape(merchant.name)).join(' · ')}</span></div>` : ''}
+        ${operation.terminals?.length ? `<div class="operation-detail"><strong>Terminais</strong><span>${operation.terminals.map((terminal) => `${escape(terminal.name)} · ${escape(terminal.version || 'versão não informada')} · ${terminal.bound ? 'vinculado' : 'pareamento pendente'}`).join('<br/>')}</span></div>` : ''}
+        <footer>${can('subscriptions.manage') && tenant ? `<button class="secondary" data-action="edit-subscription" data-id="${tenant.accountId || tenant.id}" data-store="${operation.storeId}">${operation.subscription?.providerLinked ? 'Consultar recorrência' : 'Gerenciar acesso'}</button>` : ''}${can('support.read') ? '<button class="text-button" data-action="section" data-section="ifoodRequests">Solicitações iFood →</button>' : ''}</footer></article>`;
+      }).join('') || '<div class="panel empty">Nenhuma operação encontrada. Ajuste a busca ou cadastre o primeiro cliente.</div>'}</div>
+      <p class="integration-footnote">Esta visão confere cadastros e vínculos. Confirme pedidos iFood e pagamentos no ambiente de teste da operação para validar o fluxo completo.</p>
+    </section>`;
+  }
+
   function subscriptions() {
     const query = state.filters.subscription;
     const filter = state.filters.subscriptionStatus;
-    const rows = state.tenants.map((tenant) => ({ tenant, subscription: subscriptionOf(tenant) || {} }))
-      .filter(({ tenant, subscription }) => (!query || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, query)) && (filter === 'all' || subscription.status === filter));
+    const rows = subscriptionRows();
     const contractedMonthly = rows.filter(({ subscription }) => subscription.status === 'active' && subscription.entitlementActive).reduce((sum, { subscription }) => sum + Number(planById(subscription.plan_id)?.price || 0), 0);
     const dueSoon = rows.filter(({ subscription }) => { const diff = new Date(subscription.current_period_end).getTime() - Date.now(); return subscription.entitlementActive && diff >= 0 && diff <= 7 * 86400000; }).length;
     const expired = rows.filter(({ subscription }) => subscription.periodExpired && ['active', 'trialing'].includes(subscription.status)).length;
-    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">↓ Exportar CSV</button>${can('onboarding.manage') ? `<button class="primary" data-action="open-provision">＋ Provisionar cliente</button>` : ''}`;
+    const actions = `<button class="secondary" data-action="export" data-kind="subscriptions">↓ Exportar CSV</button>${can('onboarding.manage') ? `<button class="primary" data-action="open-provision">＋ Cadastrar cliente</button>` : ''}`;
     return `<section class="page">
       ${pageHeader('RECEITA E ACESSO', 'Assinaturas', 'Controle planos, vencimentos e o acesso de cada operação ChefOS.', actions)}
-      <div class="integration-warning"><span>!</span><div><strong>Alterações de acesso são internas</strong><p>O conector de recorrência do Mercado Pago ainda não está habilitado; mudanças aqui não cancelam nem alteram cobranças no provedor.</p></div></div>
+      <div class="integration-warning"><span>!</span><div><strong>Um plano para cada operação</strong><p>As assinaturas são organizadas por operação. Acesso manual e recorrência Mercado Pago têm ações próprias; o beta continua gratuito.</p></div></div>
       <div class="summary-strip"><div><span>Receita contratada nesta visão</span><strong>${money(contractedMonthly)}</strong></div><div><span>Assinaturas exibidas</span><strong>${rows.length}</strong></div><div><span>Vencem em 7 dias</span><strong>${dueSoon}</strong></div><div class="danger-text"><span>Ativas com período vencido</span><strong>${expired}</strong></div></div>
       <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="subscription" value="${escape(query)}" placeholder="Buscar cliente, e-mail ou loja" /></div><select data-filter="subscriptionStatus" aria-label="Filtrar status"><option value="all" ${filter === 'all' ? 'selected' : ''}>Todos os status</option><option value="active" ${filter === 'active' ? 'selected' : ''}>Ativas</option><option value="trialing" ${filter === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${filter === 'past_due' ? 'selected' : ''}>Inadimplentes</option><option value="unpaid" ${filter === 'unpaid' ? 'selected' : ''}>Não pagas</option><option value="canceled" ${filter === 'canceled' ? 'selected' : ''}>Canceladas</option></select><span class="result-count">${rows.length} resultado(s)</span></div>
       <div class="panel table-wrap"><table><thead><tr><th>Cliente / operação</th><th>Plano</th><th>Status</th><th>Saúde do acesso</th><th>Valor mensal</th><th>Período atual</th><th></th></tr></thead><tbody>
-        ${rows.map(({ tenant, subscription }) => { const plan = planById(subscription.plan_id); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.stores?.[0]?.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td>${entitlement(subscription)}</td><td><strong>${money(plan?.price)}</strong><small>valor do plano</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td>${can('subscriptions.manage') ? `<button class="row-action" data-action="edit-subscription" data-id="${accountId}">Gerenciar</button>` : '<span class="read-only-label">Somente leitura</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
+        ${rows.map(({ tenant, store, subscription }) => { const plan = planById(subscription.plan_id); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(store.name || tenant.email)}</small></span></button></td><td><strong>${escape(plan?.name || 'Sem plano')}</strong><small>${plan ? `${plan.max_stores || 1} loja(s)` : 'Defina um plano'}</small></td><td>${status(subscription.status)}</td><td>${entitlement(subscription)}</td><td><strong>${money(plan?.price)}</strong><small>valor do plano</small></td><td><strong>${day(subscription.current_period_end)}</strong><small>${relative(subscription.current_period_end)}</small></td><td>${can('subscriptions.manage') ? `<button class="row-action" data-action="edit-subscription" data-id="${accountId}" data-store="${store.storeId || store.id}">${subscription.mercado_pago_subscription_id ? 'Consultar recorrência' : 'Gerenciar acesso'}</button>` : '<span class="read-only-label">Somente leitura</span>'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhuma assinatura encontrada com estes filtros.</td></tr>'}
       </tbody></table></div>
     </section>`;
   }
@@ -764,7 +821,7 @@
       <div class="summary-strip customer-summary"><div><span>Clientes</span><strong>${summary.total ?? state.tenants.length}</strong></div><div><span>Operações</span><strong>${summary.stores || 0}</strong></div><div class="warning-text"><span>Onboarding incompleto</span><strong>${summary.incompleteOnboarding || 0}</strong></div><div class="danger-text"><span>Sem assinatura</span><strong>${summary.withoutSubscription || 0}</strong></div><div><span>Chamados abertos</span><strong>${summary.openTickets || 0}</strong></div></div>
       <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="customer" value="${escape(query)}" placeholder="Buscar por nome, e-mail ou loja" /></div><span class="result-count">${rows.length} cliente(s)</span></div>
       <div class="panel table-wrap"><table><thead><tr><th>Cliente</th><th>Operações</th><th>Onboarding</th><th>Assinatura</th><th>Suporte</th><th>Última atividade</th><th></th></tr></thead><tbody>
-        ${rows.map((tenant) => { const subscription = subscriptionOf(tenant); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.email)}</small></span></button></td><td><strong>${tenant.stores?.length || 0} operação(ões)</strong><small>${escape(tenant.stores?.map((store) => store.name).join(', ') || 'Nenhuma loja')}</small></td><td>${onboarding(tenant)}</td><td>${subscription ? status(subscription.status) : status('unknown')}<small>${subscription ? escape(planById(subscription.plan_id)?.name || 'Plano não identificado') : 'Requer configuração'}</small></td><td><strong>${tenant.support?.openTickets || 0} aberto(s)</strong><small>${tenant.support?.urgentTickets || 0} prioritário(s)</small></td><td><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong><small>${date(tenant.last_sign_in_at || tenant.updated_at)}</small></td><td><button class="row-action" data-action="open-tenant" data-id="${accountId}">Visão 360º</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhum cliente encontrado.</td></tr>'}
+        ${rows.map((tenant) => { const subscription = subscriptionOf(tenant); const accountId = tenant.accountId || tenant.id; return `<tr><td><button class="customer-cell" data-action="open-tenant" data-id="${accountId}"><span class="avatar small">${initials(tenant.full_name)}</span><span><strong>${escape(tenant.full_name)}</strong><small>${escape(tenant.email)}</small></span></button></td><td><strong>${tenant.stores?.length || 0} operação(ões)</strong><small>${escape(tenant.stores?.map((store) => store.name).join(', ') || 'Nenhuma loja')}</small></td><td>${onboarding(tenant)}</td><td>${customerAccess(tenant)}<small>${tenant.subscriptions?.length || 0} assinatura(s)</small></td><td><strong>${tenant.support?.openTickets || 0} aberto(s)</strong><small>${tenant.support?.urgentTickets || 0} prioritário(s)</small></td><td><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong><small>${date(tenant.last_sign_in_at || tenant.updated_at)}</small></td><td><button class="row-action" data-action="open-tenant" data-id="${accountId}">Visão 360º</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">Nenhum cliente encontrado.</td></tr>'}
       </tbody></table></div>
       ${state.customerMeta ? `<p class="dataset-meta">Exibindo ${state.customerMeta.returned || rows.length} de ${state.customerMeta.total || rows.length} contas retornadas pela API administrativa.</p>` : ''}
     </section>`;
@@ -872,15 +929,16 @@
   }
 
   function plans() {
-    const activeSubscriptions = state.tenants.map(subscriptionOf).filter((subscription) => subscription?.status === 'active' && subscription.entitlementActive);
+    const allSubscriptions = state.tenants.flatMap((tenant) => tenant.subscriptions || []);
+    const activeSubscriptions = allSubscriptions.filter((subscription) => subscription?.status === 'active' && subscription.entitlementActive);
     const contractedMonthly = activeSubscriptions.reduce((total, subscription) => total + Number(planById(subscription.plan_id)?.price || 0), 0);
     const integrationGaps = state.plans.filter((plan) => plan.recurring && !plan.preapproval_plan_id).length;
     const planCards = state.plans.map((plan) => {
       const subscribers = activeSubscriptions.filter((subscription) => String(subscription.plan_id) === String(plan.id)).length;
-      const linkedSubscriptions = state.tenants.filter((tenant) => String(subscriptionOf(tenant)?.plan_id) === String(plan.id)).length;
+      const linkedSubscriptions = allSubscriptions.filter((subscription) => String(subscription.plan_id) === String(plan.id)).length;
       const permissions = (plan.plan_permissions || []).map((permission) => permission.permission_key);
-      const billingState = !plan.recurring ? '<span class="billing-state neutral">Pagamento único</span>' : plan.preapproval_plan_id ? '<span class="billing-state ready">Mercado Pago conectado</span>' : '<span class="billing-state warning">Recorrência pendente</span>';
-      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${plan.recurring ? 'ASSINATURA' : 'ACESSO ÚNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descrição comercial.')}</p></span>${can('plans.manage') ? `<button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button>` : '<span class="read-only-label">Somente leitura</span>'}</header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${plan.recurring ? '/ mês' : ' pagamento único'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span><span><strong>${permissions.length}</strong><small>módulos</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(permissionLabel(key))}</span>`).join('') || '<span class="muted">Nenhum módulo incluído</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} módulos incluídos</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de teste</span>${can('plans.manage') ? `<div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div>` : ''}</footer></article>`;
+      const billingState = Number(plan.price || 0) === 0 ? '<span class="billing-state neutral">Acesso gratuito</span>' : !plan.recurring ? '<span class="billing-state neutral">Pagamento único</span>' : plan.preapproval_plan_id ? '<span class="billing-state neutral">Vínculo Mercado Pago cadastrado</span>' : '<span class="billing-state warning">Recorrência pendente</span>';
+      return `<article class="plan-card ${plan.isMostPopular ? 'featured' : ''}"><header><span><div class="plan-labels"><small>${Number(plan.price || 0) === 0 ? 'GRATUITO' : plan.recurring ? 'ASSINATURA' : 'ACESSO ÚNICO'}</small>${plan.isMostPopular ? '<b>MAIS POPULAR</b>' : ''}</div><h2>${escape(plan.name)}</h2><p>${escape(plan.description || 'Sem descrição comercial.')}</p></span>${can('plans.manage') ? `<button class="row-action" data-action="edit-plan" data-id="${plan.id}">Editar</button>` : '<span class="read-only-label">Somente leitura</span>'}</header><div class="plan-price"><strong>${money(plan.price)}</strong><span>${Number(plan.price || 0) === 0 ? ' sem cobrança' : plan.recurring ? '/ mês' : ' pagamento único'}</span></div>${billingState}<div class="plan-stats"><span><strong>${subscribers}</strong><small>acessos ativos</small></span><span><strong>${plan.max_stores || 1}</strong><small>loja(s) incluída(s)</small></span><span><strong>${permissions.length}</strong><small>módulos</small></span></div><div class="permission-list">${permissions.slice(0, 5).map((key) => `<span>✓ ${escape(permissionLabel(key))}</span>`).join('') || '<span class="muted">Nenhum módulo incluído</span>'}${permissions.length > 5 ? `<small>+ ${permissions.length - 5} módulos incluídos</small>` : ''}</div><footer><span>${plan.trial_period_days || 0} dias de teste</span>${can('plans.manage') ? `<div><button class="text-button" data-action="duplicate-plan" data-id="${plan.id}">Duplicar</button><button class="danger-link" data-action="delete-plan" data-id="${plan.id}" ${linkedSubscriptions ? 'disabled title="Plano com assinaturas vinculadas"' : ''}>Excluir</button></div>` : ''}</footer></article>`;
     }).join('');
     return `<section class="page">${pageHeader('ESTRATÉGIA COMERCIAL', 'Planos e módulos', 'Modele preço, recorrência, limites e acesso sem editar o banco manualmente.', can('plans.manage') ? `<button class="primary" data-action="open-plan">＋ Criar plano</button>` : '')}
       ${integrationGaps ? `<div class="integration-warning"><span>!</span><div><strong>${integrationGaps} plano(s) recorrente(s) sem vínculo de cobrança</strong><p>Adicione o ID do plano de recorrência do Mercado Pago antes de comercializar esses planos.</p></div></div>` : ''}
@@ -903,7 +961,7 @@
     });
     const meta = state.menuMeta || { total: 0, available: 0, paused: 0, averagePrice: 0 };
     const contextActions = `<div class="catalog-context"><label><span>CLIENTE</span><select data-action="select-tenant" aria-label="Selecionar cliente">${customerOptions}</select></label><label><span>OPERAÇÃO</span><select data-action="select-store" aria-label="Selecionar operação" ${storeOptions ? '' : 'disabled'}>${storeOptions || '<option>Sem loja cadastrada</option>'}</select></label></div>`;
-    return `<section class="page">${pageHeader('OPERAÇÃO DO PRODUTO', 'Gestão de cardápios', 'Consulte e edite os itens da loja correta com todas as ações passando pela API.', contextActions)}
+    return `<section class="page">${pageHeader('OPERAÇÃO DO PRODUTO', 'Gestão de cardápios', 'Escolha a operação antes de atualizar produtos, preços e disponibilidade.', contextActions)}
       <div class="summary-strip catalog-summary"><div><span>Cliente</span><strong>${escape(selected?.full_name || '—')}</strong></div><div><span>Itens</span><strong>${meta.total || 0}</strong></div><div><span>Disponíveis</span><strong>${meta.available || 0}</strong></div><div><span>Pausados</span><strong>${meta.paused || 0}</strong></div><div><span>Preço médio</span><strong>${money(meta.averagePrice)}</strong></div></div>
       <div class="data-toolbar"><div class="search-field"><span>⌕</span><input data-search="catalog" value="${escape(query)}" placeholder="Buscar item, categoria ou código" /></div><select data-filter="catalogCategory" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option>${state.menuCategories.map((item) => `<option value="${item.id}" ${String(category) === String(item.id) ? 'selected' : ''}>${escape(item.name)}</option>`).join('')}</select><select data-filter="catalogStatus" aria-label="Filtrar disponibilidade"><option value="all" ${availability === 'all' ? 'selected' : ''}>Todos os itens</option><option value="available" ${availability === 'available' ? 'selected' : ''}>Disponíveis</option><option value="paused" ${availability === 'paused' ? 'selected' : ''}>Pausados</option></select>${can('catalog.manage') ? `<button class="primary" data-action="open-catalog-item" ${state.selectedStore ? '' : 'disabled'}>＋ Novo item</button>` : ''}<span class="result-count">${rows.length} resultado(s)</span></div>
       <div class="panel table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Preparo</th><th>Disponibilidade</th><th></th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escape(item.name)}</strong><small>${escape(item.description || item.external_code || `ID ${String(item.id).slice(0, 8)}`)}</small></td><td>${escape(item.categories?.name || 'Geral')}</td><td><strong>${money(item.price)}</strong></td><td><strong>${item.prep_time_in_minutes || 0} min</strong></td><td><span class="availability ${item.is_available ? 'on' : 'off'}"><i></i>${item.is_available ? 'Disponível' : 'Pausado'}</span></td><td>${can('catalog.manage') ? `<div class="row-actions"><button class="row-action" data-action="edit-catalog-item" data-id="${item.id}">Editar</button><button class="row-action" data-action="toggle-menu" data-id="${item.id}" data-available="${item.is_available}">${item.is_available ? 'Pausar' : 'Ativar'}</button></div>` : '<span class="read-only-label">Somente leitura</span>'}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">${state.selectedStore ? 'Nenhum item encontrado nesta operação.' : 'Selecione um cliente com loja para gerenciar o cardápio.'}</td></tr>`}</tbody></table></div>
@@ -935,7 +993,7 @@
   }
 
   function legacyAdministrators() {
-    return `<section class="page">${pageHeader('SEGURANÇA E ACESSO', 'Administradores', 'Controle quem pode operar o Control Center do ChefOS.', '')}
+    return `<section class="page">${pageHeader('SEGURANÇA E ACESSO', 'Administradores', 'Controle quem pode operar o Admin ChefOS do ChefOS.', '')}
       <div class="access-layout"><div class="panel"><div class="panel-heading"><div><p class="eyebrow">EQUIPE</p><h2>Acessos ativos</h2></div><span class="count-badge">${state.admins?.length || 0}</span></div><div class="admin-list">${(state.admins || []).map((admin) => `<div><span class="avatar">${initials(admin.email)}</span><span><strong>${escape(admin.email)}</strong><small>${admin.protected ? 'Administrador raiz' : 'Administrador'} · desde ${day(admin.created_at)}</small></span>${admin.protected ? '<span class="root-badge">Protegido</span>' : `<button class="danger-link" data-action="delete-admin" data-email="${escape(admin.email)}">Remover</button>`}</div>`).join('') || '<p class="empty">Nenhum administrador encontrado.</p>'}</div></div>
         <form class="panel invite-card" data-form="admin"><span class="invite-icon">＋</span><p class="eyebrow">NOVO ACESSO</p><h2>Adicionar administrador</h2><p class="muted">O usuário precisa existir no Supabase Auth para conseguir entrar.</p><label>E-mail corporativo<input name="email" type="email" required placeholder="nome@chefos.online" /></label><button class="primary" type="submit">Autorizar acesso</button></form></div>
     </section>`;
@@ -1068,14 +1126,17 @@
   }
 
   function activePage() {
-    const pages = { overview, ifoodRequests, mywork: workboard, workboard, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
+    const pages = { overview, integrations, ifoodRequests, mywork: workboard, workboard, subscriptions, tenants, beta, support, plans, catalog, provision, health, logs, administrators };
     return (pages[state.section] || overview)();
   }
 
   function subscriptionModal(tenant) {
-    const subscription = subscriptionOf(tenant) || {};
+    const store = (tenant?.stores || []).find((item) => String(item.storeId || item.id) === String(state.modal.storeId)) || (tenant?.stores?.length === 1 ? tenant.stores[0] : null);
+    if (!store) return '<div class="modal-shell" role="dialog" aria-modal="true"><div class="modal-card"><div class="modal-body"><h2>Escolha a operação</h2><p>Abra Assinaturas e selecione a loja que deseja gerenciar.</p><button class="primary" data-action="close-modal">Voltar</button></div></div></div>';
+    const subscription = store.subscription || store.subscriptions?.[0] || tenant.subscriptions?.find((item) => (item.storeId || item.user_id) === (store.storeId || store.id)) || {};
+    if (subscription.mercado_pago_subscription_id) return '<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><div class="modal-card"><header><div><p class="eyebrow">RECORRÊNCIA MERCADO PAGO</p><h2 id="modal-title">' + escape(store.name) + '</h2></div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><form data-form="billing-sync"><div class="modal-body"><p>Consulte o provedor para atualizar o status e o período de acesso desta operação.</p><p>Esta ação não cria cobrança nem cancela a recorrência.</p><input type="hidden" name="storeId" value="' + escape(store.storeId || store.id) + '"/><label>Motivo da consulta<textarea name="reason" required minlength="5" maxlength="500"></textarea></label></div><footer><button type="button" class="secondary" data-action="close-modal">Voltar</button><button class="primary" type="submit">Atualizar pelo Mercado Pago</button></footer></form></div></div>';
     const accountId = tenant.accountId || tenant.id;
-    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GESTÃO DE ACESSO</p><h2 id="modal-title">Assinatura de ${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="accountId" value="${accountId}"/><div class="modal-alert"><strong>Atenção à cobrança</strong><p>Esta ação altera o acesso interno. A recorrência do Mercado Pago ainda precisa ser gerenciada separadamente.</p></div><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="unpaid" ${subscription.status === 'unpaid' ? 'selected' : ''}>Não paga</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} — ${money(plan.price)}/mês</option>`).join('')}</select></label><label>Fim do período atual<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" ${subscription.id ? '' : 'required'} /></label><label>Motivo da alteração<textarea name="reason" required minlength="5" maxlength="500" placeholder="Ex.: pagamento confirmado manualmente pelo financeiro"></textarea></label><div class="modal-summary"><span><small>SAÚDE DO ACESSO</small><strong>${entitlement(subscription)}</strong></span><span><small>VALOR DO PLANO</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar com auditoria</button></footer></form></div>`;
+    return `<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><form class="modal-card" data-form="subscription"><header><div><p class="eyebrow">GESTÃO DE ACESSO</p><h2 id="modal-title">${escape(store.name)}</h2><p>${escape(tenant.email)}</p></div><button type="button" class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="modal-body"><input type="hidden" name="accountId" value="${accountId}"/><input type="hidden" name="storeId" value="${store.storeId || store.id}"/><div class="modal-alert"><strong>Atenção à cobrança</strong><p>Esta operação tem acesso gerenciado pelo ChefOS. Salvar não gera uma cobrança. Durante o beta, mantenha o plano gratuito.</p></div><label>Status<select name="status" required><option value="active" ${subscription.status === 'active' ? 'selected' : ''}>Ativa</option><option value="trialing" ${subscription.status === 'trialing' ? 'selected' : ''}>Em teste</option><option value="past_due" ${subscription.status === 'past_due' ? 'selected' : ''}>Inadimplente</option><option value="unpaid" ${subscription.status === 'unpaid' ? 'selected' : ''}>Não paga</option><option value="canceled" ${subscription.status === 'canceled' ? 'selected' : ''}>Cancelada</option></select></label><label>Plano<select name="planId" required>${state.plans.map((plan) => `<option value="${plan.id}" ${String(subscription.plan_id) === String(plan.id) ? 'selected' : ''}>${escape(plan.name)} — ${money(plan.price)}/mês</option>`).join('')}</select></label><label>Fim do período atual<input name="currentPeriodEnd" type="date" value="${toInputDate(subscription.current_period_end)}" ${subscription.id ? '' : 'required'} /></label><label>Motivo da alteração<textarea name="reason" required minlength="5" maxlength="500" placeholder="Ex.: pagamento confirmado manualmente pelo financeiro"></textarea></label><div class="modal-summary"><span><small>SAÚDE DO ACESSO</small><strong>${entitlement(subscription)}</strong></span><span><small>VALOR DO PLANO</small><strong>${money(planById(subscription.plan_id)?.price)}</strong></span></div></div><footer><button type="button" class="secondary" data-action="close-modal">Cancelar</button><button class="primary" type="submit">Salvar com auditoria</button></footer></form></div>`;
   }
 
   function tenantModal(tenant) {
@@ -1083,7 +1144,7 @@
     const plan = planById(subscription.plan_id);
     const accountId = tenant.accountId || tenant.id;
     const missingLabels = { store: 'Criar loja principal', company_profile: 'Completar perfil da empresa', company_data: 'Completar dados fiscais da empresa', subscription: 'Configurar assinatura' };
-    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="drawer-title"><p class="eyebrow">VISÃO 360º DO CLIENTE</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p><div class="drawer-signals">${subscription ? status(subscription.status) : status('unknown')}${entitlement(subscription)}${onboarding(tenant)}</div></div><div class="detail-grid"><span><small>PLANO</small><strong>${escape(plan?.name || 'Sem plano')}</strong></span><span><small>VALOR CONTRATADO</small><strong>${money(plan?.price)}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>ÚLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span><span><small>CHAMADOS ABERTOS</small><strong>${tenant.support?.openTickets || 0}</strong></span><span><small>PRIORITÁRIOS</small><strong>${tenant.support?.urgentTickets || 0}</strong></span></div>${tenant.onboarding?.missing?.length ? `<section class="drawer-checklist"><div class="panel-heading"><h3>Próximas ações</h3><span class="count-badge">${tenant.onboarding.missing.length}</span></div>${tenant.onboarding.missing.map((item) => `<div><i>!</i><span><strong>${escape(missingLabels[item] || item)}</strong><small>Necessário para concluir o onboarding</small></span></div>`).join('')}</section>` : '<div class="drawer-all-clear"><i>✓</i><span><strong>Onboarding completo</strong><small>Estrutura mínima pronta para operar.</small></span></div>'}<section><div class="panel-heading"><h3>Operações</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>◫</span><span><strong>${escape(store.name)}</strong><small>ID ${escape(String(store.storeId || store.id).slice(0, 8))} · criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma operação vinculada.</p>'}</div></section><footer>${can('subscriptions.manage') ? `<button class="secondary" data-action="edit-subscription" data-id="${accountId}">Gerenciar assinatura</button>` : ''}${can('catalog.read') ? `<button class="primary" data-action="tenant-catalog" data-id="${accountId}">Ver cardápio</button>` : ''}</footer></aside></div>`;
+    return `<div class="modal-shell drawer-shell" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="modal-backdrop" data-action="close-modal" aria-label="Fechar"></button><aside class="detail-drawer"><header><div class="avatar large">${initials(tenant.full_name)}</div><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></header><div class="drawer-title"><p class="eyebrow">VISÃO 360º DO CLIENTE</p><h2 id="drawer-title">${escape(tenant.full_name)}</h2><p>${escape(tenant.email)}</p><div class="drawer-signals">${customerAccess(tenant)}${onboarding(tenant)}</div></div><div class="detail-grid"><span><small>PLANO</small><strong>${escape([...new Set((tenant.subscriptions || []).map((item) => planById(item.plan_id)?.name).filter(Boolean))].join(' · ') || 'Sem plano')}</strong></span><span><small>VALOR DOS PLANOS</small><strong>${money((tenant.subscriptions || []).reduce((total,item) => total + Number(planById(item.plan_id)?.price || 0),0))}</strong></span><span><small>CLIENTE DESDE</small><strong>${day(tenant.created_at)}</strong></span><span><small>ÚLTIMO ACESSO</small><strong>${relative(tenant.last_sign_in_at || tenant.updated_at)}</strong></span><span><small>CHAMADOS ABERTOS</small><strong>${tenant.support?.openTickets || 0}</strong></span><span><small>PRIORITÁRIOS</small><strong>${tenant.support?.urgentTickets || 0}</strong></span></div>${tenant.onboarding?.missing?.length ? `<section class="drawer-checklist"><div class="panel-heading"><h3>Próximas ações</h3><span class="count-badge">${tenant.onboarding.missing.length}</span></div>${tenant.onboarding.missing.map((item) => `<div><i>!</i><span><strong>${escape(missingLabels[item] || item)}</strong><small>Necessário para concluir o onboarding</small></span></div>`).join('')}</section>` : '<div class="drawer-all-clear"><i>✓</i><span><strong>Onboarding completo</strong><small>Estrutura mínima pronta para operar.</small></span></div>'}<section><div class="panel-heading"><h3>Operações</h3><span class="count-badge">${tenant.stores?.length || 0}</span></div><div class="store-list">${(tenant.stores || []).map((store) => `<div><span>◫</span><span><strong>${escape(store.name)}</strong><small>ID ${escape(String(store.storeId || store.id).slice(0, 8))} · criada em ${day(store.created_at)}</small></span></div>`).join('') || '<p class="empty">Nenhuma operação vinculada.</p>'}</div></section><footer>${can('subscriptions.manage') ? `<button class="secondary" data-action="section" data-section="subscriptions">Ver assinaturas por operação</button>` : ''}${can('customers.read') ? `<button class="secondary" data-action="tenant-integrations" data-id="${accountId}">Ver integrações</button>` : ''}${can('catalog.read') ? `<button class="primary" data-action="tenant-catalog" data-id="${accountId}">Ver cardápio</button>` : ''}</footer></aside></div>`;
   }
 
   function planModal() {
@@ -1319,7 +1380,7 @@
       })
       : state.tenants.filter((tenant) => !state.filters.customer || includes(`${tenant.full_name} ${tenant.email} ${tenant.stores?.map((store) => store.name).join(' ')}`, state.filters.customer));
     const rows = kind === 'subscriptions'
-      ? [['Cliente', 'Email', 'Loja', 'Plano', 'Status', 'Valor mensal', 'Renovação'], ...sourceTenants.map((tenant) => { const subscription = tenant.subscriptions?.[0] || {}; const plan = planById(subscription.plan_id); return [tenant.full_name, tenant.email, tenant.stores?.[0]?.name || '', plan?.name || '', subscription.status || '', plan?.price || 0, subscription.current_period_end || '']; })]
+      ? [['Cliente', 'Email', 'Loja', 'Plano', 'Status', 'Valor mensal', 'Renovação'], ...subscriptionRows().map(({tenant, store, subscription}) => { const plan = planById(subscription.plan_id); return [tenant.full_name, tenant.email, store.name, plan?.name || '', subscription.status || '', plan?.price || 0, subscription.current_period_end || '']; })]
       : [['Cliente', 'Email', 'Lojas', 'Status', 'Criado em', 'Último acesso'], ...sourceTenants.map((tenant) => [tenant.full_name, tenant.email, tenant.stores?.map((store) => store.name).join(' | ') || '', tenant.subscriptions?.[0]?.status || '', tenant.created_at || '', tenant.last_sign_in_at || ''])];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(';')).join('\n');
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
@@ -1378,9 +1439,16 @@
       await verifyMfa(values.code);
       return;
     }
+    if (form.dataset.form === 'billing-sync') {
+      await api('/api/admin/billing', { method: 'POST', body: { action: 'sync_subscription', storeId: values.storeId, reason: values.reason } });
+      state.modal = null; state.modalDirty = false; state.integrations = null;
+      await loadCore();
+      showNotice('Status atualizado pelo Mercado Pago e registrado na auditoria.');
+      return;
+    }
     if (form.dataset.form === 'subscription') {
       const currentPeriodEnd = values.currentPeriodEnd ? new Date(`${values.currentPeriodEnd}T23:59:59`).toISOString() : undefined;
-      const result = await api('/api/admin/subscriptions', { method: 'POST', body: { accountId: values.accountId, status: values.status, planId: values.planId, currentPeriodEnd, reason: values.reason } });
+      const result = await api('/api/admin/subscriptions', { method: 'POST', body: { storeId: values.storeId, accountId: values.accountId, status: values.status, planId: values.planId, currentPeriodEnd, reason: values.reason } });
       state.modal = null;
       state.modalDirty = false;
       await loadCore();
@@ -1515,6 +1583,14 @@
     const target = event.target.closest('[data-action]');
     if (!target) return;
     const action = target.dataset.action;
+    if (action === 'refresh-integrations') {
+      return withPending('refresh-integrations', target, async () => { await loadSection('integrations', true); render(); showNotice('Informações atualizadas.'); });
+    }
+    if (action === 'tenant-integrations') {
+      const tenant = state.tenants.find((item) => String(item.accountId || item.id) === String(target.dataset.id));
+      state.filters.integration = tenant?.full_name || '';
+      return openSection('integrations');
+    }
     if (action === 'logout') {
       if ((state.modalDirty || state.pageDirty) && !window.confirm('Sair e descartar as alterações não salvas?')) return;
       return signOut();
@@ -1591,7 +1667,7 @@
       return openSection('provision');
     }
     if (action === 'open-tenant') { state.globalQuery = ''; openModal({ type: 'tenant', id: target.dataset.id }, target); return; }
-    if (action === 'edit-subscription') { openModal({ type: 'subscription', id: target.dataset.id }, target); return; }
+    if (action === 'edit-subscription') { openModal({ type: 'subscription', id: target.dataset.id, storeId: target.dataset.store }, target); return; }
     if (action === 'tenant-catalog') {
       state.modal = null;
       state.modalDirty = false;
@@ -1697,7 +1773,7 @@
       });
     }
     if (action === 'delete-admin') {
-      if (!confirm(`Remover ${target.dataset.email} do Control Center?`)) return;
+      if (!confirm(`Remover ${target.dataset.email} do Admin ChefOS?`)) return;
       return withPending(`delete-admin:${target.dataset.email}`, target, async () => {
         await api('/api/admin/administrators', { method: 'DELETE', body: { email: target.dataset.email, reason: 'Acesso revogado pelo painel' } });
         try { await loadSection('administrators', true); }

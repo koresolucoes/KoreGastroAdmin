@@ -64,10 +64,13 @@ export default async function handler(req, res) {
 
     const [existingResult, planResult] = await Promise.all([
       supabase(`/rest/v1/subscriptions?select=*&user_id=eq.${encodeURIComponent(store.id)}&limit=1`),
-      planId ? supabase(`/rest/v1/plans?select=id,name,trial_period_days&id=eq.${encodeURIComponent(planId)}&limit=1`) : Promise.resolve({ data: [] })
+      planId ? supabase(`/rest/v1/plans?select=id,name,price,trial_period_days&id=eq.${encodeURIComponent(planId)}&limit=1`) : Promise.resolve({ data: [] })
     ]);
     const existing = existingResult.data?.[0] || null;
     if (planId) assert(planResult.data?.[0], 'Plano não encontrado.');
+    assert(!existing?.mercado_pago_subscription_id, 'Esta assinatura é gerenciada pelo Mercado Pago. Atualize o status pelo provedor.', 409);
+    const beta = await supabase(`/rest/v1/beta_participants?select=id&store_id=eq.${encodeURIComponent(store.id)}&status=eq.active&limit=1`);
+    if (beta.data?.length && planId) assert(Number(planResult.data[0].price || 0) === 0, 'Conclua o beta antes de contratar um plano pago.', 409);
 
     if (!existing) {
       assert(planId, 'planId é obrigatório para criar uma assinatura.');
@@ -93,8 +96,8 @@ export default async function handler(req, res) {
       });
       return reply(res, 201, {
         data: created.data?.[0] ? { ...created.data[0], storeId: store.id } : null,
-        providerSync: 'not_configured',
-        warning: 'A alteração foi aplicada internamente e ainda não sincroniza o ciclo recorrente do Mercado Pago.'
+        providerSync: 'internal_only',
+        warning: 'Acesso atualizado. Esta assinatura não possui recorrência vinculada ao Mercado Pago.'
       });
     }
 
@@ -123,8 +126,8 @@ export default async function handler(req, res) {
     });
     return reply(res, 200, {
       data: updated.data?.[0] ? { ...updated.data[0], storeId: store.id } : null,
-      providerSync: 'not_configured',
-      warning: 'A alteração foi aplicada internamente e ainda não sincroniza o ciclo recorrente do Mercado Pago.'
+      providerSync: 'internal_only',
+      warning: 'Acesso atualizado. Esta assinatura não possui recorrência vinculada ao Mercado Pago.'
     });
   } catch (error) {
     return fail(res, error);

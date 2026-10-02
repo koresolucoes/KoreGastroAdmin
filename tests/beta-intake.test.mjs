@@ -78,3 +78,10 @@ test('operação de outro proprietário não pode ser vinculada ao candidato',as
   await assert.rejects(updateBetaApplication({user:{id:randomUUID(),email:'admin@example.invalid'},capabilities:['onboarding.manage']},{id,status:'onboarding',storeId,note:'Preparar conta',expectedUpdatedAt:candidate.updated_at}),error => error.status===409);
   assert.equal(calls.some(call=>call.path.includes('/rpc/')),false);
 });
+test('ativação do beta recusa plano pago antes de iniciar o período gratuito',async t=>{
+  const id=randomUUID(),storeId=randomUUID(),planId=randomUUID();
+  const candidate={id,status:'onboarding',email:'beta@example.invalid',updated_at:'2026-10-02T18:00:00Z',participant:{store_id:storeId,subscription_id:randomUUID()}};
+  const calls=backend(t,call=>call.path==='/rest/v1/beta_applications'?[200,[candidate]]:call.path==='/rest/v1/subscriptions'?[200,[{id:candidate.participant.subscription_id,plan_id:planId,mercado_pago_subscription_id:null}]]:[200,[{id:planId,price:199}]]);
+  await assert.rejects(updateBetaApplication({user:{id:randomUUID(),email:'admin@example.invalid'}},{id,status:'active',note:'Ativar participante',expectedUpdatedAt:candidate.updated_at}),error=>error.status===409);
+  assert.equal(calls.some(call=>call.path.includes('/rpc/')),false);
+});

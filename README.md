@@ -109,7 +109,9 @@ As rotas legadas continuam disponíveis por compatibilidade: `/api/v2/admin/*` a
 - O dual-write em `unit_permissions` é temporário e existe apenas para compatibilidade.
 - Receita é exibida como **estimativa contratada** pelo preço atual do plano. Ela só deve ser chamada de MRR financeiro depois da conciliação com o provedor de pagamentos.
 - Alterações de assinatura exigem motivo e são gravadas em `system_logs` com estado anterior e posterior.
-- Alterações internas de status, plano ou vencimento ainda não sincronizam a recorrência do Mercado Pago; o painel exibe esse aviso antes de salvar.
+- Assinaturas sem recorrência permitem gestão interna por operação. Contratos vinculados ao Mercado Pago bloqueiam edição local e permitem consultar/sincronizar o estado real por `/api/admin/billing`, encaminhando a sessão à API central.
+- `/api/admin/integrations` reúne acesso, beta, módulos, equipe e vínculos iFood/Cielo/Mercado Pago por loja. Não retorna credenciais e não confunde cadastro com validação de transações.
+- O beta exige plano gratuito na ativação. Assinaturas e planos com participantes ativos não podem ser convertidos em cobrança por estas rotas administrativas.
 - `plans` e `plan_permissions` são preservados para promoções, planos Founders, parceiros, legacy e futuras estratégias comerciais.
 - `plan_permissions` continua usando chaves de rota enquanto o ChefOS mantiver esse contrato; o Control Center não introduz um modelo comercial novo nesta etapa.
 
