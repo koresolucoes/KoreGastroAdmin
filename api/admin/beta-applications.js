@@ -13,7 +13,7 @@ export default async function handler(req, res) {
       const status = cleanText(queryValue(req, 'status', ''), 30);
       if (status) assertEnum(status, STATUSES, 'status');
       const filter = status ? `&status=eq.${encodeURIComponent(status)}` : '';
-      const result = await supabase(`/rest/v1/beta_applications?select=*,events:beta_application_events(id,event_type,from_status,to_status,actor_email,note,created_at),participant:beta_participants(id,status,cohort,activated_at,beta_ends_at)&order=submitted_at.desc${filter}&limit=250`);
+      const result = await supabase(`/rest/v1/beta_applications?select=*,events:beta_application_events(id,event_type,from_status,to_status,actor_email,note,created_at),participant:beta_participants(id,status,cohort,activated_at,beta_ends_at,store_id,subscription_id,store:stores(name))&order=submitted_at.desc${filter}&limit=250`);
       const data = (result.data || []).map((item) => ({ ...item, events: [...(item.events || [])].sort((a,b) => new Date(b.created_at) - new Date(a.created_at)) }));
       const summary = Object.fromEntries(STATUSES.map((key) => [key, data.filter((item) => item.status === key).length]));
       return reply(res, 200, { data, summary, stages: STATUSES, transitions: BETA_TRANSITIONS });

@@ -1,4 +1,4 @@
-import { assert, assertEnum, assertUuid, auditAdminAction, cleanText, supabase } from './admin.js';
+import { assert, assertEnum, assertUuid, cleanText, hasCapability, supabase, supabaseAuthAdmin } from './admin.js';
 
 export const BETA_STATUSES = ['new','review','contact','interview','approved','onboarding','active','completed','converted','closed'];
 export const BETA_PARTICIPANT_STATUSES = new Set(['onboarding', 'active', 'completed', 'converted', 'closed']);
@@ -156,86 +156,34 @@ export function buildBetaParticipantChange({ currentStatus, nextStatus, particip
 
 export async function updateBetaApplication(context, payload, options = {}) {
   assertUuid(payload.id, 'candidatura');
-  const before = await supabase(`/rest/v1/beta_applications?select=*,participant:beta_participants(id,status,cohort,activated_at,beta_ends_at)&id=eq.${encodeURIComponent(payload.id)}&limit=1`);
+  const before = await supabase(`/rest/v1/beta_applications?select=*,participant:beta_participants(id,status,cohort,activated_at,beta_ends_at,store_id,subscription_id)&id=eq.${encodeURIComponent(payload.id)}&limit=1`);
   assert(before.data?.[0], 'Candidatura não encontrada.', 404);
   const current = before.data[0];
   const nextStatus = cleanText(payload.status ?? current.status, 30);
   assertEnum(nextStatus, BETA_STATUSES, 'status');
   assertBetaExpectedUpdatedAt(current.updated_at, options.expectedUpdatedAt ?? payload.expectedUpdatedAt);
   assertBetaTransition(current.status, nextStatus);
-
   const note = cleanText(payload.note, 1000) || null;
-  const statusChanged = nextStatus !== current.status;
-  const assignmentProvided = Object.hasOwn(payload, 'assignedTo');
-  const nextAssignedTo = assignmentProvided
-    ? (cleanText(payload.assignedTo, 254) || null)
-    : (current.assigned_to || context.user.email);
-  const assignmentChanged = nextAssignedTo !== (current.assigned_to || null);
   assertBetaTransitionNote(current.status, nextStatus, note, options);
-
-  const now = new Date().toISOString();
-  // Planejar e validar a sincronização antes de alterar a candidatura evita
-  // gravar "active" ou "converted" quando o participante necessário não existe.
-  const participantChange = buildBetaParticipantChange({
-    currentStatus: current.status,
-    nextStatus,
-    participant: current.participant || null,
-    cohort: payload.cohort,
-    now
+  const assignmentProvided = Object.hasOwn(payload, 'assignedTo');
+  const nextAssignedTo = assignmentProvided ? (cleanText(payload.assignedTo, 254) || null) : (current.assigned_to || context.user.email);
+  let storeId = null;
+  if (payload.storeId) {
+    assert(hasCapability(context, 'onboarding.manage'), 'Você não possui permissão para vincular a operação.', 403);
+    assertUuid(payload.storeId, 'operação');
+    const store = (await supabase(`/rest/v1/stores?select=id,owner_id&id=eq.${encodeURIComponent(payload.storeId)}&limit=1`)).data?.[0];
+    assert(store, 'Operação não encontrada.', 404);
+    const owner = (await supabaseAuthAdmin(`/admin/users/${store.owner_id}`)).data;
+    assert(String(owner?.email || '').toLowerCase() === String(current.email).toLowerCase(), 'A conta da operação deve usar o e-mail da candidatura.', 409);
+    storeId = store.id;
+  }
+  const result = await supabase('/rest/v1/rpc/update_beta_application_atomic', { method: 'POST', body: {
+    p_id: current.id, p_expected_updated_at: current.updated_at, p_status: nextStatus, p_note: note,
+    p_assigned_to: nextAssignedTo, p_assignment_provided: assignmentProvided, p_cohort: cleanText(payload.cohort, 80) || null,
+    p_actor_user_id: context.user.id, p_actor_email: context.user.email, p_store_id: storeId
+  } }).catch(error => {
+    if (['40001','22023','23505'].includes(error?.details?.code)) error.status = 409;
+    throw error;
   });
-  let updatedApplication = current;
-  if (statusChanged || note || assignmentChanged) {
-    const versionFilter = current.updated_at ? `&updated_at=eq.${encodeURIComponent(current.updated_at)}` : '';
-    const updated = await supabase(`/rest/v1/beta_applications?id=eq.${encodeURIComponent(payload.id)}${versionFilter}`, {
-      method: 'PATCH',
-      headers: { Prefer: 'return=representation' },
-      body: { status: nextStatus, notes: note ?? current.notes, assigned_to: nextAssignedTo, updated_at: now }
-    });
-    assert(updated.data?.[0], 'Esta candidatura foi atualizada por outra sessão. Recarregue os dados antes de salvar novamente.', 409);
-    updatedApplication = updated.data[0];
-    if (statusChanged || note) {
-      await supabase('/rest/v1/beta_application_events', {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: { application_id: payload.id, event_type: statusChanged ? 'status_changed' : 'note_added', from_status: current.status, to_status: nextStatus, actor_email: context.user.email, note }
-      });
-    }
-  }
-
-  if (participantChange) {
-    const participant = current.participant || null;
-    if (participantChange.create) {
-      const created = await supabase('/rest/v1/beta_participants', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: { application_id: payload.id, ...participantChange.body }
-      });
-      const createdParticipant = created.data?.[0];
-      assert(createdParticipant, 'Não foi possível criar o participante do beta.', 502);
-      await supabase('/rest/v1/beta_application_events', {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: { application_id: payload.id, event_type: 'participant_created', from_status: current.status, to_status: nextStatus, actor_email: context.user.email }
-      });
-      await auditAdminAction(context, 'ADMIN_BETA_PARTICIPANT_CREATED', {
-        targetType: 'beta_application', targetId: payload.id, participantId: createdParticipant.id,
-        before: { status: current.status }, after: { status: nextStatus }, reason: note
-      });
-    } else {
-      await supabase(`/rest/v1/beta_participants?id=eq.${encodeURIComponent(participant.id)}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=representation' },
-        body: participantChange.body
-      });
-    }
-  }
-
-  if (statusChanged || note || assignmentChanged) {
-    await auditAdminAction(context, 'ADMIN_BETA_APPLICATION_UPDATED', {
-      targetType: 'beta_application', targetId: payload.id,
-      before: { status: current.status, assignedTo: current.assigned_to || null }, after: { status: nextStatus, assignedTo: nextAssignedTo }, reason: note
-    });
-  }
-
-  return { current, data: updatedApplication, status: nextStatus, statusChanged, assignmentChanged };
+  return { current, data: result.data, status: nextStatus, statusChanged: nextStatus !== current.status, assignmentChanged: nextAssignedTo !== current.assigned_to };
 }

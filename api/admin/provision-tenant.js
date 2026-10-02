@@ -5,10 +5,12 @@ import {
   bodyOf,
   cleanText,
   fail,
+  hasCapability,
   requireAdmin,
   reply,
   supabase
 } from '../_lib/admin.js';
+import { updateBetaApplication } from '../_lib/beta-operations.js';
 
 const DAY = 86400000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -224,6 +226,14 @@ export default async function handler(req, res) {
 
   try {
     const payload = await bodyOf(req);
+    let betaApplication = null;
+    if (payload.betaApplicationId) {
+      assert(hasCapability(context, 'beta.manage'), 'Você não possui permissão para preparar participantes do beta.', 403);
+      assertUuid(payload.betaApplicationId, 'candidatura');
+      betaApplication = (await supabase(`/rest/v1/beta_applications?select=*,participant:beta_participants(id,store_id)&id=eq.${encodeURIComponent(payload.betaApplicationId)}&limit=1`)).data?.[0];
+      assert(betaApplication && ['approved', 'onboarding'].includes(betaApplication.status), 'Aprove a candidatura antes de preparar a conta.', 409);
+      assert(String(payload.email || '').trim().toLowerCase() === betaApplication.email.toLowerCase(), 'Use o e-mail da candidatura para criar o acesso.', 409);
+    }
     const storeName = cleanText(payload.storeName, 180);
     const fullName = cleanText(payload.fullName, 160);
     const values = {
@@ -250,11 +260,15 @@ export default async function handler(req, res) {
 
     const { store, created: storeCreated } = await ensurePrimaryStore(accountId, storeName, authUserCreated);
     assert(store?.id, 'Não foi possível criar ou localizar a loja principal.');
+    assert(!betaApplication?.participant?.store_id || betaApplication.participant.store_id === store.id, 'A candidatura está vinculada a outra operação. Revise o cadastro antes de continuar.', 409);
     const externalApiKey = await ensureCompanyProfile(store, values);
     const { membership, created: membershipCreated, repaired: membershipRepaired } = await ensureOwnerMembership(accountId, store.id);
     const { subscription, created: subscriptionCreated } = await ensureSubscription(store.id, plan);
     await ensureLegacyStoreAccess(accountId, store.id);
     const hall = await ensureDiningRoom(store.id);
+    if (betaApplication && !betaApplication.participant?.store_id) {
+      await updateBetaApplication(context, { id: betaApplication.id, status: 'onboarding', storeId: store.id, note: 'Conta preparada e vinculada. Os 90 dias começarão na ativação operacional.', expectedUpdatedAt: betaApplication.updated_at });
+    }
 
     await auditAdminAction(context, 'ADMIN_TENANT_PROVISIONED', {
       accountId,
