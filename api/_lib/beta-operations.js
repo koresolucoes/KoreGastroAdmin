@@ -177,6 +177,14 @@ export async function updateBetaApplication(context, payload, options = {}) {
     assert(String(owner?.email || '').toLowerCase() === String(current.email).toLowerCase(), 'A conta da operação deve usar o e-mail da candidatura.', 409);
     storeId = store.id;
   }
+  if (nextStatus === 'active' && current.status !== 'active') {
+    const linkedStoreId = storeId || current.participant?.store_id;
+    assertUuid(linkedStoreId, 'operação vinculada ao beta');
+    const subscription = (await supabase(`/rest/v1/subscriptions?select=id,plan_id,mercado_pago_subscription_id&user_id=eq.${encodeURIComponent(linkedStoreId)}&limit=1`)).data?.[0];
+    assert(subscription && !subscription.mercado_pago_subscription_id, 'Prepare uma assinatura sem recorrência para ativar o beta gratuito.', 409);
+    const plan = (await supabase(`/rest/v1/plans?select=id,price&id=eq.${encodeURIComponent(subscription.plan_id)}&limit=1`)).data?.[0];
+    assert(plan && Number(plan.price) === 0, 'Selecione um plano gratuito antes de ativar o beta.', 409);
+  }
   const result = await supabase('/rest/v1/rpc/update_beta_application_atomic', { method: 'POST', body: {
     p_id: current.id, p_expected_updated_at: current.updated_at, p_status: nextStatus, p_note: note,
     p_assigned_to: nextAssignedTo, p_assignment_provided: assignmentProvided, p_cohort: cleanText(payload.cohort, 80) || null,

@@ -331,3 +331,10 @@ body { overflow-x: clip; }
   .ux-page-number { order: -1; grid-column: 1 / -1; width: 100%; }
   .ux-table-pagination .secondary { width: 100%; }
 }
+
+.ux-context-guide { display:block; background:var(--surface-2); border-color:var(--line); }
+.ux-context-guide summary { display:flex; justify-content:space-between; cursor:pointer; font-weight:600; padding:4px 0; color:var(--muted); }
+.ux-context-guide[open] summary { margin-bottom:16px; color:var(--text); }
+.ux-context-guide summary::marker { content:""; }
+.ux-context-guide .ux-guide-steps b { background:var(--surface-3); color:var(--text); }
+.ux-quick-actions button { background:var(--surface); border-color:var(--line); }

@@ -69,6 +69,10 @@ export default async function handler(req, res) {
     if (req.method === 'PUT') {
       const normalizedPlan = plan ? normalizePlan(plan, true) : null;
       assert((normalizedPlan && Object.keys(normalizedPlan).length) || permissionsProvided, 'Nenhuma alteração válida foi informada.');
+      if (Number(normalizedPlan?.price || 0) > 0 || normalizedPlan?.preapproval_plan_id) {
+        const participants = await supabase(`/rest/v1/beta_participants?select=id,subscription:subscriptions!inner(plan_id)&status=eq.active&subscription.plan_id=eq.${encodeURIComponent(id)}&limit=1`);
+        assert(!participants.data?.length, 'Este plano mantém participantes em beta gratuito. Conclua o ciclo antes de alterar a cobrança.', 409);
+      }
       if (normalizedPlan && Object.keys(normalizedPlan).length) await supabase(`/rest/v1/plans?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: normalizedPlan });
       if (permissionsProvided) await replacePermissions(id, [...new Set(permissions.map((key) => cleanText(key, 120)).filter(Boolean))]);
       if (normalizedPlan?.isMostPopular) await makePopularExclusive(id);

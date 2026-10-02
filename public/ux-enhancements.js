@@ -82,10 +82,10 @@
     const guide = GUIDES[currentRoute()];
     if (!guide) return;
     const [title, text, steps] = guide;
-    const block = document.createElement('section');
+    const block = document.createElement('details');
     block.className = 'ux-context-guide';
     block.dataset.uxOwned = 'true';
-    block.innerHTML = `<div class="ux-guide-icon" aria-hidden="true">i</div><div><strong>${title}</strong><p>${text}</p><div class="ux-guide-steps">${steps.map((step, index) => `<span><b>${index + 1}</b>${step}</span>`).join('')}</div></div>`;
+    block.innerHTML = `<summary>Ajuda nesta página <span aria-hidden="true">＋</span></summary><div><strong>${title}</strong><p>${text}</p><div class="ux-guide-steps">${steps.map((step, index) => `<span><b>${index + 1}</b>${step}</span>`).join('')}</div></div>`;
     header.insertAdjacentElement('afterend', block);
   }
 
@@ -97,7 +97,10 @@
     const block = document.createElement('section');
     block.className = 'ux-quick-start panel';
     block.dataset.uxOwned = 'true';
-    block.innerHTML = `<header><div><p class="eyebrow">PRIMEIROS PASSOS</p><h2>O painel em quatro ações</h2><p>Você não precisa conhecer toda a estrutura para começar.</p></div><button type="button" class="icon-button" data-ux-action="dismiss-quick-start" aria-label="Ocultar primeiros passos">×</button></header><div class="ux-quick-actions"><button data-action="open-provision"><b>1</b><span><strong>Cadastrar cliente</strong><small>Conta, loja e plano em um fluxo</small></span></button><button data-action="section" data-section="tenants"><b>2</b><span><strong>Consultar cliente</strong><small>Abra a visão completa</small></span></button><button data-action="section" data-section="subscriptions"><b>3</b><span><strong>Revisar acesso</strong><small>Plano, status e vencimento</small></span></button><button data-action="section" data-section="support"><b>4</b><span><strong>Atender suporte</strong><small>Fila, conversa e resolução</small></span></button></div>`;
+    block.innerHTML = `<header><div><p class="eyebrow">PRIMEIROS PASSOS</p><h2>Atalhos de trabalho</h2><p>Acesse as ações disponíveis para sua função.</p></div><button type="button" class="icon-button" data-ux-action="dismiss-quick-start" aria-label="Ocultar primeiros passos">×</button></header><div class="ux-quick-actions"><button data-action="open-provision"><b>1</b><span><strong>Cadastrar cliente</strong><small>Conta, loja e plano em um fluxo</small></span></button><button data-action="section" data-section="tenants"><b>2</b><span><strong>Consultar cliente</strong><small>Abra a visão completa</small></span></button><button data-action="section" data-section="subscriptions"><b>3</b><span><strong>Revisar acesso</strong><small>Plano, status e vencimento</small></span></button><button data-action="section" data-section="support"><b>4</b><span><strong>Atender suporte</strong><small>Fila, conversa e resolução</small></span></button></div>`;
+    block.querySelectorAll('[data-section]').forEach((button) => { if (!document.querySelector('.nav-item[data-section="' + button.dataset.section + '"]')) button.remove(); });
+    if (!document.querySelector('[data-action="open-provision"]')) block.querySelector('[data-action="open-provision"]')?.remove();
+    block.querySelectorAll('.ux-quick-actions button b').forEach((badge, index) => badge.textContent = index + 1);
     guide.insertAdjacentElement('afterend', block);
   }
 
