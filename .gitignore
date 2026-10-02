@@ -3,4 +3,5 @@ node_modules/
 .env
 .env.local
 dist/
+supabase/.temp/
 /public/index.html

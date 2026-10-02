@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { bodyOf, cleanText, fail, reply, supabase } from '../_lib/admin.js';
+import { bodyOf, cleanText, reply, supabase } from '../_lib/admin.js';
 
 const allowedOrigins = () => (process.env.PUBLIC_ALLOWED_ORIGINS || 'https://chefos.shop,https://www.chefos.shop,https://chefos.online,https://www.chefos.online')
   .split(',').map((value) => value.trim()).filter(Boolean);
@@ -32,32 +32,29 @@ export default async function handler(req, res) {
       return reply(res, 400, { error: 'Preencha nome, restaurante, e-mail válido e aceite os termos do programa.' });
     }
 
+    const requestId = cleanText(payload.requestId, 80) || null;
+    if (requestId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) return reply(res, 400, { error: 'Reabra o formulário e tente novamente.' });
+    const hasPrivacy = Object.hasOwn(payload, 'consentPrivacy');
+    const termsVersion = cleanText(process.env.BETA_CONSENT_VERSION || 'beta-terms-v1', 80);
+    const privacyVersion = cleanText(process.env.BETA_PRIVACY_VERSION || 'privacy-v1', 80);
+    if (hasPrivacy && (payload.consentPrivacy !== true || payload.privacyVersion !== privacyVersion || payload.termsVersion !== termsVersion)) return reply(res, 400, { error: 'Revise a política de privacidade e o regulamento antes de enviar.' });
+    const normalized = {
+      name, restaurantName, email, phone: cleanText(payload.phone || payload.whatsapp, 40), establishmentType: cleanText(payload.establishmentType, 80),
+      source: ['chefos.shop', 'chefos.online'].includes(cleanText(payload.source, 80)) ? cleanText(payload.source, 80) : 'landing',
+      city: cleanText(payload.city, 100), neighborhood: cleanText(payload.neighborhood, 100), equipment: cleanText(payload.equipment, 120),
+      consentTerms: true, consentMarketing: payload.consentMarketing === true, consentPrivacy: hasPrivacy ? true : null,
+      termsVersion, privacyVersion: hasPrivacy ? privacyVersion : null,
+      campaign: { source: cleanText(payload.campaign?.source, 100), medium: cleanText(payload.campaign?.medium, 100), name: cleanText(payload.campaign?.name, 100) }
+    };
+    const requestHash = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
     const fingerprint = createHash('sha256').update(String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim()).digest('hex');
-    const since = encodeURIComponent(new Date(Date.now() - 60 * 60 * 1000).toISOString());
-    const attempts = await supabase(`/rest/v1/beta_submission_attempts?select=id&fingerprint=eq.${fingerprint}&created_at=gte.${since}&limit=5`);
-    if ((attempts.data || []).length >= 5) return reply(res, 429, { error: 'Limite de tentativas atingido. Aguarde antes de tentar novamente.' });
-    await supabase('/rest/v1/beta_submission_attempts', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: { fingerprint } });
-
-    const application = await supabase('/rest/v1/beta_applications', {
-      method: 'POST', headers: { Prefer: 'return=representation' }, body: {
-        name, restaurant_name: restaurantName, email,
-        phone: cleanText(payload.phone || payload.whatsapp, 40) || null,
-        establishment_type: cleanText(payload.establishmentType, 80) || null,
-        restaurant_size: cleanText(payload.restaurantSize, 80) || null,
-        source: ['chefos.shop', 'chefos.online'].includes(cleanText(payload.source, 80)) ? cleanText(payload.source, 80) : 'landing',
-        consent_terms: true, consent_marketing: payload.consentMarketing === true,
-        consent_version: cleanText(process.env.BETA_CONSENT_VERSION || 'beta-terms-v1', 80)
-      }
-    });
-    const row = application.data?.[0];
-    await supabase('/rest/v1/beta_consent_events', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: [
-      { application_id: row.id, consent_type: 'program_terms', granted: true, document_version: row.consent_version, source: row.source },
-      { application_id: row.id, consent_type: 'marketing', granted: row.consent_marketing, document_version: row.consent_version, source: row.source }
-    ] });
-    await supabase('/rest/v1/beta_application_events', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: { application_id: row.id, event_type: 'submitted', to_status: 'new', metadata: { source: row.source } } });
-    return reply(res, 201, { received: true, id: row.id });
+    const result = await supabase('/rest/v1/rpc/submit_beta_application_atomic', { method: 'POST', body: { p_payload: { ...normalized, requestId, requestHash }, p_fingerprint: fingerprint } });
+    const { http_status: status, ...response } = result.data;
+    return reply(res, status || 201, response);
   } catch (error) {
+    if (error?.status === 400) return reply(res, 400, { error: 'Revise os dados do formulário antes de enviar.' });
     if (error?.details?.code === '23505') return reply(res, 409, { error: 'Já existe uma candidatura ativa para este e-mail.' });
-    return fail(res, error);
+    console.error('[Beta intake]', { code: error?.details?.code, status: error?.status });
+    return reply(res, 502, { error: 'Não foi possível enviar agora. Tente novamente.' });
   }
 }
